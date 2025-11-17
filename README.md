@@ -57,6 +57,35 @@ cargo run --bin lupa -- <x> <y> <width> <height> [zoom|passthrough] [pos_x pos_y
 
 ---
 
+### ▶️ Running From Release Build (No Rust Required)
+
+If you prefer not to compile the project, you can run it directly using the pre-built binaries:
+
+1. Download the **`target/release`** folder (or extract it from a release ZIP).
+2. Inside this folder, run the main executable:
+
+   **`area_selector.exe`**  
+   Launches the main control panel for selecting areas and starting the magnifier.
+
+
+### 📌 Auxiliary Binaries
+
+These executables are also available in the same folder:
+
+- **`seletor.exe`**  
+  Opens the fullscreen area selector for choosing the capture region.
+
+- **`lupa.exe`**  
+  Starts the magnifier window (requires arguments such as position, size, zoom, or passthrough).
+
+
+### ⚠️ Important
+
+Make sure all `.exe` files remain in the **same directory**,  
+as they depend on shared resources and configuration files.
+
+---
+
 ## 👑 Demonstration
 
 ![](./assets/placeholder-demo.gif)
@@ -89,10 +118,6 @@ cargo run --bin lupa -- <x> <y> <width> <height> [zoom|passthrough] [pos_x pos_y
 ### 🟥 Problem — Persisting User Configuration  
 Keeping area, zoom and position across sessions required a clean persistent solution integrated into user directories.  
 **Solution:** implemented `AppConfig` using `serde_json` and stored it under the OS config path.
-
-### 🟧 Problem — Accurate Screen Capture  
-Capturing regions in Windows with correct memory alignment and RGB mapping was challenging.  
-**Solution:** used `GDI + BitBlt + GetDIBits` to manually convert pixel buffers into `RgbaImage`.
 
 ### 🟩 Problem — Click-Through Mode  
 Switching between interactive and passthrough modes required dynamic editing of extended window styles.  
