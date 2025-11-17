@@ -2,8 +2,12 @@
 
 ## 🌐 Description
 
-This project provides a complete desktop tool for selecting a screen region and magnifying it through an accessibility-friendly zoom window (the “Lupa”).  
-It offers precise area selection, persistent configuration storage, passthrough mode (click-through), window repositioning, zoom adjustments, and multi-binary architecture for modular execution.
+This application is designed to assist users with limited field of view or visual accessibility needs.
+It enables precise selection of any region on the screen and magnifies it through an adjustable, accessibility-friendly zoom window (“Lupa”).
+
+The tool allows users to reposition and resize the magnified area, control zoom intensity, and toggle passthrough mode (allowing clicks to pass through the magnifier).
+All settings are saved automatically, providing a flexible and customizable interface tailored to visually impaired users.
+Its modular multi-binary architecture ensures smooth operation, whether selecting areas, magnifying content, or adjusting configurations.
 
 ![](./assets/placeholder-main-image.png)
 
@@ -122,6 +126,13 @@ Keeping area, zoom and position across sessions required a clean persistent solu
 ### 🟩 Problem — Click-Through Mode  
 Switching between interactive and passthrough modes required dynamic editing of extended window styles.  
 **Solution:** read and reapplied HWND using `WS_EX_TRANSPARENT` plus layered attributes.
+
+### 🟦 Problem — High CPU Usage & Memory Leak During Selection
+
+Originally, the selection overlay (the blue rectangle drawn during area selection) was rendered every frame at ~60 FPS while also capturing screen data using the scrap crate.
+This caused unnecessary GPU/CPU usage and a visible memory leak, especially on 4K monitors, because the capture pipeline and rendering loop were being executed far more often than necessary.
+
+**Solution:** replaced the frame-based capture from scrap with the Windows Accessibility API, which provides a more efficient, event-driven way to retrieve screen content. This eliminated the leak, reduced resource usage, and made the selection preview significantly smoother and more stable overall.
 
 ---
 
