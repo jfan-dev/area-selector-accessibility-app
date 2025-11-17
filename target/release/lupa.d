@@ -1,0 +1,1 @@
+B:\estudo\area_selector\target\release\lupa.exe: B:\estudo\area_selector\bin\lupa_main.rs B:\estudo\area_selector\src\capture.rs B:\estudo\area_selector\src\config.rs B:\estudo\area_selector\src\lib.rs B:\estudo\area_selector\src\lupa.rs B:\estudo\area_selector\src\model.rs B:\estudo\area_selector\src\ui_selector.rs

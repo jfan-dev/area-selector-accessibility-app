@@ -1,0 +1,37 @@
+[package]
+name = "area_selector"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "area_selector"
+path = "src/main.rs"
+
+[[bin]]
+name = "lupa"
+path = "bin/lupa_main.rs"
+
+[[bin]]
+name = "seletor"
+path = "bin/seletor_main.rs"
+
+[dependencies]
+eframe = "0.26"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "5.0"
+scrap = "0.5"
+image = "0.24"
+tray-icon = "0.8.3"
+muda = "0.8.7"
+winit = "0.29"
+
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+

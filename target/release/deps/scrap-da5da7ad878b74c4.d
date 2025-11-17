@@ -1,0 +1,11 @@
+B:\estudo\area_selector\target\release\deps\scrap-da5da7ad878b74c4.d: C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\lib.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\mod.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\ffi.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\mod.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\dxgi.rs
+
+B:\estudo\area_selector\target\release\deps\libscrap-da5da7ad878b74c4.rlib: C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\lib.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\mod.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\ffi.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\mod.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\dxgi.rs
+
+B:\estudo\area_selector\target\release\deps\libscrap-da5da7ad878b74c4.rmeta: C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\lib.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\mod.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\ffi.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\mod.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\dxgi.rs
+
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\lib.rs:
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\mod.rs:
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\dxgi\ffi.rs:
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\mod.rs:
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\scrap-0.5.0\src\common\dxgi.rs:

@@ -1,0 +1,829 @@
+# Project: area_selector
+# App state (outubro/2025)
+
+##─────────────── 🗂️ Estrutura ───────────────
+area_selector/
+├── bin/
+│   ├── lupa_main.rs        # 🟦 Binário separado da lupa
+│   └── seletor_main.rs     # 🟨 Binário separado para o seletor de área
+├── src/
+│   ├── app.rs              # 🎛️ Lógica do painel principal (botões, subprocessos)
+│   ├── capture.rs          # 📸 Captura GDI (Windows)
+│   ├── config.rs           # 💾 Salva/carrega área em JSON
+│   ├── lib.rs              # 📚 Define os módulos do projeto
+│   ├── lupa.rs             # 🔍 Componente da lupa (reutilizado no binário)
+│   ├── main.rs             # 🧠 Janela principal com botões
+│   ├── model.rs            # 📐 Structs de dados (Area, SerializablePos)
+│   └── ui_selector.rs      # 🖱️ Aplicativo de seleção de área (janela fullscreen)
+├── target/                 # 🔧 Saída de build (`cargo build`)
+│   └── release/
+│       ├── area_selector.exe
+│       ├── lupa.exe
+│       └── seletor.exe
+├── Cargo.toml
+
+##─────────────── 📦 Cargo.toml ───────────────
+
+[package]
+name = "area_selector"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "area_selector"
+path = "src/main.rs"
+
+[[bin]]
+name = "lupa"
+path = "bin/lupa_main.rs"
+
+[[bin]]
+name = "seletor"
+path = "bin/seletor_main.rs"
+
+[dependencies]
+eframe = "0.26"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "5.0"
+scrap = "0.5"
+image = "0.24"
+tray-icon = "0.8.3"
+muda = "0.8.7"
+winit = "0.29"
+
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+##─────────────── 🚀 src/main.rs ───────────────
+
+mod app;
+mod config;
+mod model;
+mod capture;
+mod lupa;
+mod ui_selector;
+
+use eframe::egui::ViewportBuilder;
+use app::App;
+
+fn main() -> eframe::Result<()> {
+    eframe::run_native(
+        "Selecionador de Área",
+        eframe::NativeOptions {
+            viewport: ViewportBuilder::default()
+                .with_inner_size([400.0, 200.0])
+                .with_resizable(false)
+                .with_decorations(true)
+                .with_transparent(false),
+            ..Default::default()
+        },
+        Box::new(|_cc| Box::new(App::new())),
+    )
+}
+
+##─────────────── 📦 src/lib.rs ───────────────
+
+pub mod lupa;
+pub mod capture;
+pub mod config;
+pub mod model;
+pub mod ui_selector;
+
+##─────────────── 🧠 src/app.rs ───────────────
+
+use eframe::egui::{self, *};
+use crate::model::Area;
+use crate::config::{self, AppConfig};
+use std::process::{Command, Child};
+
+pub struct App {
+    saved_area: Option<Area>,
+    seletor_child: Option<Child>,
+    config: AppConfig,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        let cfg = config::load_config();
+        Self {
+            saved_area: cfg.area,
+            seletor_child: None,
+            config: cfg,
+        }
+    }
+}
+
+impl App {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn area_to_xywh(area: crate::model::Area) -> [String; 4] {
+        let x = area.start.x.min(area.end.x).round() as u32;
+        let y = area.start.y.min(area.end.y).round() as u32;
+        let w = (area.start.x - area.end.x).abs().round() as u32;
+        let h = (area.start.y - area.end.y).abs().round() as u32;
+        [x.to_string(), y.to_string(), w.to_string(), h.to_string()]
+    }
+}
+
+impl eframe::App for App {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Verifica se o processo seletor terminou
+        if let Some(child) = self.seletor_child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    let cfg = config::load_config();
+                    self.saved_area = cfg.area;
+                    self.config = cfg;
+                    self.seletor_child = None;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("Erro ao esperar seletor: {}", e);
+                    self.seletor_child = None;
+                }
+            }
+        }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.heading("🖥️ Área Selector");
+
+                // Botão para selecionar área
+                if ui.button("Selecionar Área").clicked() {
+                    let exe = std::env::current_exe()
+                        .unwrap()
+                        .with_file_name("seletor.exe");
+                    if let Ok(child) = Command::new(exe).spawn() {
+                        self.seletor_child = Some(child);
+                    }
+                }
+
+                ui.separator();
+
+                // 🔍 Lupa
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(self.saved_area.is_some(), Button::new("Iniciar Lupa")).clicked() {
+                        if let Some(area) = self.saved_area {
+                            let [x, y, w, h] = Self::area_to_xywh(area);
+                            let exe = std::env::current_exe().unwrap().with_file_name("lupa.exe");
+                            let zoom = self.config.lupa_zoom.to_string();
+                            let pos_x = self.config.lupa_pos_x.to_string();
+                            let pos_y = self.config.lupa_pos_y.to_string();
+
+                            let _ = Command::new(&exe)
+                                .args([x, y, w, h, zoom, pos_x, pos_y])
+                                .spawn();
+                        }
+                    }
+
+                    if ui.button("Alternar Lupa Passthrough").clicked() {
+                        if let Some(area) = self.saved_area {
+                            let [x, y, w, h] = Self::area_to_xywh(area);
+                            let exe = std::env::current_exe().unwrap().with_file_name("lupa.exe");
+
+                            // Lê HWND salvo
+                            let hwnd_path = dirs::config_dir()
+                                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                                .join("area_selector")
+                                .join("lupa_hwnd.txt");
+
+                            let mut passthrough = false;
+                            let mut hwnd_val: Option<isize> = None;
+
+                            if let Ok(data) = std::fs::read_to_string(&hwnd_path) {
+                                if let Ok(val) = usize::from_str_radix(data.trim(), 10) {
+                                    use windows::Win32::UI::WindowsAndMessaging::*;
+                                    unsafe {
+                                        let hwnd = windows::Win32::Foundation::HWND(val as *mut _);
+                                        let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+                                        hwnd_val = Some(val as isize);
+                                        if style & WS_EX_TRANSPARENT.0 as i32 != 0 {
+                                            passthrough = true;
+                                        }
+                                    }
+                                }
+                            }
+
+                            let new_mode = if passthrough { "normal" } else { "passthrough" };
+
+                            // Fecha a lupa existente
+                            if let Some(val) = hwnd_val {
+                                use windows::Win32::UI::WindowsAndMessaging::*;
+                                unsafe {
+                                    let hwnd = windows::Win32::Foundation::HWND(val as *mut _);
+                                    let _ = SendMessageW(
+                                        hwnd,
+                                        WM_CLOSE,
+                                        windows::Win32::Foundation::WPARAM(0),
+                                        windows::Win32::Foundation::LPARAM(0),
+                                    );
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                            }
+
+                            // Reabre com novo modo
+                            let zoom = self.config.lupa_zoom.to_string();
+                            let pos_x = self.config.lupa_pos_x.to_string();
+                            let pos_y = self.config.lupa_pos_y.to_string();
+
+                            if new_mode == "passthrough" {
+                                let _ = std::process::Command::new(&exe)
+                                    .args([x, y, w, h, "passthrough".to_string(), pos_x, pos_y])
+                                    .spawn();
+                            } else {
+                                let _ = std::process::Command::new(&exe)
+                                    .args([x, y, w, h, zoom, pos_x, pos_y])
+                                    .spawn();
+                            }
+                        }
+                    }
+                });
+
+                ui.separator();
+
+                // ⚙️ Configurações da lupa
+                ui.heading("Configurações da Lupa");
+                ui.add(Slider::new(&mut self.config.lupa_zoom, 0.5..=5.0).text("Zoom"));
+                ui.add(Slider::new(&mut self.config.lupa_pos_x, 0.0..=1920.0).text("Posição X"));
+                ui.add(Slider::new(&mut self.config.lupa_pos_y, 0.0..=1080.0).text("Posição Y"));
+
+                if ui.button("💾 Salvar Configurações").clicked() {
+                    config::save_config(&self.config);
+                    ui.label("✔️ Configurações salvas!");
+                }
+
+                ui.separator();
+
+                if let Some(area) = self.saved_area {
+                    ui.label(format!(
+                        "Área salva: start=({:.1}, {:.1}), end=({:.1}, {:.1})",
+                        area.start.x, area.start.y, area.end.x, area.end.y
+                    ));
+                } else {
+                    ui.label("Nenhuma área salva ainda.");
+                }
+
+                ui.separator();
+
+                if ui.button("❌ Sair").clicked() {
+                    std::process::exit(0);
+                }
+            });
+        });
+    }
+}
+
+##─────────────── 💾 src/config.rs ───────────────
+
+use crate::model::Area;
+use serde::{Serialize, Deserialize};
+use std::fs;
+use std::path::PathBuf;
+
+/// Configurações persistentes da aplicação
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AppConfig {
+    pub area: Option<Area>,
+    pub lupa_pos_x: f32,
+    pub lupa_pos_y: f32,
+    pub lupa_zoom: f32,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            area: None,
+            lupa_pos_x: 100.0,
+            lupa_pos_y: 100.0,
+            lupa_zoom: 1.0,
+        }
+    }
+}
+
+pub fn config_path() -> PathBuf {
+    let dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.join("area_selector").join("config.json")
+}
+
+pub fn save_config(cfg: &AppConfig) {
+    let path = config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+
+    if let Ok(json) = serde_json::to_string_pretty(cfg) {
+        fs::write(path, json).ok();
+    }
+}
+
+pub fn load_config() -> AppConfig {
+    let path = config_path();
+    if let Ok(data) = fs::read_to_string(path) {
+        if let Ok(cfg) = serde_json::from_str::<AppConfig>(&data) {
+            return cfg;
+        }
+    }
+    AppConfig::default()
+}
+
+/// Salva somente a área, mantendo as demais configurações
+pub fn save_area(area: &Area) {
+    let mut cfg = load_config();
+    cfg.area = Some(area.clone());
+    save_config(&cfg);
+}
+
+##─────────────── 📐 src/model.rs ───────────────
+ 
+use serde::{Deserialize, Serialize};
+use eframe::egui;
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct SerializablePos {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl From<egui::Pos2> for SerializablePos {
+    fn from(p: egui::Pos2) -> Self {
+        Self { x: p.x, y: p.y }
+    }
+}
+
+impl From<SerializablePos> for egui::Pos2 {
+    fn from(p: SerializablePos) -> Self {
+        egui::pos2(p.x, p.y)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct Area {
+    pub start: SerializablePos,
+    pub end: SerializablePos,
+}
+
+##─────────────── 🔎 src/lupa.rs ───────────────
+
+use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions, Frame};
+use crate::capture;
+use std::time::Duration;
+
+/// 🔍 Janela da lupa — renderiza captura da tela com zoom e borda colorida.
+pub struct LupaApp {
+    area: (u32, u32, u32, u32),
+    zoom: f32,
+    texture: Option<TextureHandle>,
+    buffer: Vec<u8>,
+    interactive: bool, // 🟢 true = interativa, false = passthrough
+}
+
+impl LupaApp {
+    /// Cria uma nova lupa.
+    pub fn new(area: (u32, u32, u32, u32), zoom: f32, interactive: bool) -> Self {
+        Self {
+            area,
+            zoom,
+            texture: None,
+            buffer: Vec::new(),
+            interactive,
+        }
+    }
+
+    /// Atualiza a textura com o conteúdo capturado da tela.
+    fn update_texture(&mut self, ctx: &egui::Context) {
+        if let Some(img) = capture::capture_area(self.area.0, self.area.1, self.area.2, self.area.3) {
+            let size = [img.width() as usize, img.height() as usize];
+            self.buffer.clear();
+            self.buffer.reserve(size[0] * size[1] * 4);
+            for p in img.pixels() {
+                self.buffer.extend_from_slice(&p.0);
+            }
+
+            let image = ColorImage::from_rgba_unmultiplied(size, &self.buffer);
+
+            if let Some(tex) = &mut self.texture {
+                tex.set(image, TextureOptions::LINEAR);
+            } else {
+                self.texture = Some(ctx.load_texture(
+                    "lupa_texture",
+                    image,
+                    TextureOptions::LINEAR,
+                ));
+            }
+        }
+    }
+}
+
+impl eframe::App for LupaApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.update_texture(ctx);
+
+        egui::CentralPanel::default()
+            .frame(Frame::none()) // 🔲 janela totalmente transparente
+            .show(ctx, |ui| {
+                let rect = ui.max_rect();
+                let painter = ui.painter_at(rect);
+
+                if let Some(tex) = &self.texture {
+                    let size = tex.size_vec2() * self.zoom;
+                    ui.image((tex.id(), size));
+                } else {
+                    ui.label("⌛ Carregando...");
+                }
+
+                // 🎨 Borda colorida conforme modo
+                let color = if self.interactive {
+                    egui::Color32::from_rgb(0, 255, 0) // 🟢 verde viva (interativa)
+                } else {
+                    egui::Color32::from_rgb(180, 180, 180) // ⚪ cinza clara (passthrough)
+                };
+                painter.rect_stroke(rect, 0.0, egui::Stroke::new(3.0, color));
+            });
+
+        // Redesenha a cada 50ms (~20 FPS)
+        ctx.request_repaint_after(Duration::from_millis(50));
+    }
+}
+
+##─────────────── 📸 src/capture.rs ───────────────
+
+use image::{Rgba, RgbaImage};
+use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Gdi::*;
+
+/// Captura uma região da tela usando GDI BitBlt (Windows)
+pub fn capture_area(x: u32, y: u32, w: u32, h: u32) -> Option<RgbaImage> {
+    unsafe {
+        // pega o DC da tela inteira
+        let hdc_screen = GetDC(HWND(std::ptr::null_mut()));
+        if hdc_screen.0.is_null() {
+            return None;
+        }
+
+        // cria DC compatível
+        let hdc_mem = CreateCompatibleDC(hdc_screen);
+        if hdc_mem.0.is_null() {
+            ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
+            return None;
+        }
+
+        // cria bitmap compatível
+        let hbitmap = CreateCompatibleBitmap(hdc_screen, w as i32, h as i32);
+        if hbitmap.0.is_null() {
+            DeleteDC(hdc_mem);
+            ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
+            return None;
+        }
+
+        // seleciona bitmap no DC
+        let old_obj = SelectObject(hdc_mem, HGDIOBJ(hbitmap.0));
+        if old_obj.0.is_null() {
+            DeleteObject(HGDIOBJ(hbitmap.0));
+            DeleteDC(hdc_mem);
+            ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
+            return None;
+        }
+
+        // copia pixels da tela para o bitmap
+        if BitBlt(
+            hdc_mem,
+            0,
+            0,
+            w as i32,
+            h as i32,
+            hdc_screen,
+            x as i32,
+            y as i32,
+            SRCCOPY,
+        ).is_ok()
+        {
+            // configura estrutura para GetDIBits
+            let mut bmp_info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: w as i32,
+                    biHeight: -(h as i32), // negativo = imagem "top-down"
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0 as u32,
+                    biSizeImage: 0,
+                    biXPelsPerMeter: 0,
+                    biYPelsPerMeter: 0,
+                    biClrUsed: 0,
+                    biClrImportant: 0,
+                },
+                bmiColors: [RGBQUAD {
+                    rgbBlue: 0,
+                    rgbGreen: 0,
+                    rgbRed: 0,
+                    rgbReserved: 0,
+                }; 1],
+            };
+
+            let buf_size = (w * h * 4) as usize;
+            let mut buffer = vec![0u8; buf_size];
+
+            if GetDIBits(
+                hdc_mem,
+                hbitmap,
+                0,
+                h as u32,
+                Some(buffer.as_mut_ptr() as *mut _),
+                &mut bmp_info,
+                DIB_RGB_COLORS,
+            ) != 0
+            {
+                let mut img = RgbaImage::new(w, h);
+
+                for iy in 0..h {
+                    for ix in 0..w {
+                        let i = ((iy * w + ix) * 4) as usize;
+                        if i + 3 >= buffer.len() {
+                            continue;
+                        }
+                        img.put_pixel(
+                            ix,
+                            iy,
+                            Rgba([
+                                buffer[i + 2], // R
+                                buffer[i + 1], // G
+                                buffer[i],     // B
+                                255,           // A
+                            ]),
+                        );
+                    }
+                }
+
+                // cleanup
+                SelectObject(hdc_mem, old_obj);
+                DeleteObject(HGDIOBJ(hbitmap.0));
+                DeleteDC(hdc_mem);
+                ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
+
+                return Some(img);
+            }
+        }
+
+        // cleanup em caso de erro
+        SelectObject(hdc_mem, old_obj);
+        DeleteObject(HGDIOBJ(hbitmap.0));
+        DeleteDC(hdc_mem);
+        ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
+
+        None
+    }
+}
+
+##─────────────── 🎨 src/ui_selector.rs ───────────────
+
+use eframe::egui::{self, *};
+use crate::{config, model::Area as ScreenArea};
+
+pub struct AreaSelector {
+    selecting: bool,
+    start: Option<Pos2>,
+    end: Option<Pos2>,
+}
+
+impl Default for AreaSelector {
+    fn default() -> Self {
+        Self {
+            selecting: false,
+            start: None,
+            end: None,
+        }
+    }
+}
+
+impl eframe::App for AreaSelector {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        CentralPanel::default()
+            .frame(Frame::none())
+            .show(ctx, |ui| {
+                let rect = ui.max_rect();
+                let painter = ui.painter_at(rect);
+
+                // Fundo translúcido
+                painter.rect_filled(
+                    rect,
+                    0.0,
+                    Color32::from_rgba_unmultiplied(0, 0, 0, 12),
+                );
+
+                // Lógica de clique e arraste
+                if ctx.input(|i| i.pointer.primary_down()) {
+                    if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
+                        if !self.selecting {
+                            self.selecting = true;
+                            self.start = Some(pos);
+                        }
+                        self.end = Some(pos);
+                    }
+                } else if self.selecting {
+                    self.selecting = false;
+
+                    if let (Some(start), Some(end)) = (self.start, self.end) {
+                        let area = ScreenArea {
+                            start: start.into(),
+                            end: end.into(),
+                        };
+                        config::save_area(&area);
+                        println!("✅ Área salva: {:?}", area);
+                        std::process::exit(0);
+                    }
+                }
+
+                // Desenha o retângulo da seleção
+                if let (Some(start), Some(end)) = (self.start, self.end) {
+                    painter.rect(
+                        Rect::from_two_pos(start, end),
+                        0.0,
+                        Color32::from_rgba_unmultiplied(100, 150, 255, 100),
+                        Stroke::new(1.0, Color32::BLUE),
+                    );
+                }
+
+                ui.label("Clique e arraste para selecionar uma área. ESC cancela.");
+            });
+
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            std::process::exit(0);
+        }
+
+        ctx.request_repaint_after(std::time::Duration::from_millis(30));
+    }
+}
+
+##─────────────── 🧪 bin/lupa_main.rs ───────────────
+
+use area_selector::{lupa::LupaApp, config};
+use eframe::egui::{self, ViewportBuilder};
+use std::{fs, path::PathBuf, thread, time::Duration};
+use windows::{
+    Win32::Foundation::*,
+    Win32::UI::WindowsAndMessaging::*,
+};
+
+fn hwnd_file_path() -> PathBuf {
+    let dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.join("area_selector").join("lupa_hwnd.txt")
+}
+
+fn main() -> eframe::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 5 {
+        eprintln!("Uso: lupa <x> <y> <w> <h> [zoom|passthrough] [pos_x pos_y]");
+        std::process::exit(1);
+    }
+
+    let x = args[1].parse().unwrap_or(0);
+    let y = args[2].parse().unwrap_or(0);
+    let w = args[3].parse().unwrap_or(100);
+    let h = args[4].parse().unwrap_or(100);
+
+    let mut cfg = config::load_config();
+    let mut zoom = cfg.lupa_zoom;
+    let mut passthrough = false;
+
+    if args.len() >= 6 {
+        if args[5].eq_ignore_ascii_case("passthrough") {
+            passthrough = true;
+        } else {
+            zoom = args[5].parse().unwrap_or(cfg.lupa_zoom);
+        }
+    }
+
+    // posição opcional vinda dos argumentos
+    if args.len() >= 8 {
+        cfg.lupa_pos_x = args[6].parse::<f32>().unwrap_or(cfg.lupa_pos_x);
+        cfg.lupa_pos_y = args[7].parse::<f32>().unwrap_or(cfg.lupa_pos_y);
+        config::save_config(&cfg);
+        println!("💾 Nova posição salva: ({}, {})", cfg.lupa_pos_x, cfg.lupa_pos_y);
+    }
+
+    let area = (x, y, w, h);
+
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([w as f32 * zoom, h as f32 * zoom])
+            .with_position([cfg.lupa_pos_x, cfg.lupa_pos_y])
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_always_on_top(),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "Lupa",
+        options,
+        Box::new(move |_cc| {
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(500));
+                unsafe {
+                    if let Some(hwnd) = get_foreground_hwnd() {
+                        save_hwnd(hwnd);
+                        if passthrough {
+                            set_passthrough(hwnd, true);
+                        }
+                    }
+                }
+            });
+
+            Box::new(LupaWithExit::new(area, zoom, !passthrough))
+        }),
+    )
+}
+
+struct LupaWithExit {
+    lupa: LupaApp,
+}
+
+impl LupaWithExit {
+    fn new(area: (u32, u32, u32, u32), zoom: f32, interactive: bool) -> Self {
+        Self { lupa: LupaApp::new(area, zoom, interactive) }
+    }
+}
+
+impl eframe::App for LupaWithExit {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.lupa.update(ctx, frame);
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            std::process::exit(0);
+        }
+    }
+}
+
+unsafe fn get_foreground_hwnd() -> Option<HWND> {
+    let hwnd = GetForegroundWindow();
+    if hwnd.0.is_null() { None } else { Some(hwnd) }
+}
+
+fn save_hwnd(hwnd: HWND) {
+    if let Some(parent) = hwnd_file_path().parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(hwnd_file_path(), format!("{}", hwnd.0 as usize));
+}
+
+fn load_hwnd() -> Option<HWND> {
+    if let Ok(data) = fs::read_to_string(hwnd_file_path()) {
+        if let Ok(val) = usize::from_str_radix(data.trim(), 10) {
+            return Some(HWND(val as *mut _));
+        }
+    }
+    None
+}
+
+unsafe fn set_passthrough(hwnd: HWND, enable: bool) {
+    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+    let new_style = if enable {
+        ex_style | WS_EX_LAYERED.0 as i32 | WS_EX_TRANSPARENT.0 as i32
+    } else {
+        ex_style & !(WS_EX_TRANSPARENT.0 as i32)
+    };
+    SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
+    let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
+}
+
+##─────────────── 🧪 bin/seletor_main.rs ───────────────
+
+use area_selector::ui_selector::AreaSelector;
+use eframe::{egui::ViewportBuilder, Renderer};
+
+// Importações atualizadas para windows 0.58
+use windows::Win32::UI::WindowsAndMessaging::{SM_CXSCREEN, SM_CYSCREEN, GetSystemMetrics};
+
+fn main() -> eframe::Result<()> {
+    // Captura tamanho da tela via API do Windows
+    let screen_width = (unsafe { GetSystemMetrics(SM_CXSCREEN) } - 1) as f32;
+    let screen_height = (unsafe { GetSystemMetrics(SM_CYSCREEN) }) as f32;
+
+    let options = eframe::NativeOptions {
+        viewport: ViewportBuilder::default()
+            .with_inner_size([screen_width, screen_height])
+            .with_position([0.0, 0.0])
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_always_on_top()
+            .with_resizable(false),
+        renderer: Renderer::Glow,
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "Selecionar Área",
+        options,
+        Box::new(|_cc| Box::new(AreaSelector::default())),
+    )
+}
+

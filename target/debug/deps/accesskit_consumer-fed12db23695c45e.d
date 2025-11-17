@@ -1,0 +1,10 @@
+B:\estudo\area_selector\target\debug\deps\accesskit_consumer-fed12db23695c45e.d: C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\lib.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\tree.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\node.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\filters.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\iterators.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\text.rs
+
+B:\estudo\area_selector\target\debug\deps\libaccesskit_consumer-fed12db23695c45e.rmeta: C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\lib.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\tree.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\node.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\filters.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\iterators.rs C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\text.rs
+
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\lib.rs:
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\tree.rs:
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\node.rs:
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\filters.rs:
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\iterators.rs:
+C:\Users\jfan-dev\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.16.1\src\text.rs:
