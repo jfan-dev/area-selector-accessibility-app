@@ -86,17 +86,24 @@ cargo run --bin lupa -- <x> <y> <width> <height> [zoom|passthrough] [pos_x pos_y
 
 ## 🛠 Challenges and Solutions
 
-### 🟥 Problem X — Persisting User Configuration  
+### 🟥 Problem — Persisting User Configuration  
 Keeping area, zoom and position across sessions required a clean persistent solution integrated into user directories.  
 **Solution:** implemented `AppConfig` using `serde_json` and stored it under the OS config path.
 
-### 🟧 Problem Y — Accurate Screen Capture  
+### 🟧 Problem — Accurate Screen Capture  
 Capturing regions in Windows with correct memory alignment and RGB mapping was challenging.  
 **Solution:** used `GDI + BitBlt + GetDIBits` to manually convert pixel buffers into `RgbaImage`.
 
-### 🟩 Problem Z — Click-Through Mode  
+### 🟩 Problem — Click-Through Mode  
 Switching between interactive and passthrough modes required dynamic editing of extended window styles.  
 **Solution:** read and reapplied HWND using `WS_EX_TRANSPARENT` plus layered attributes.
+
+---
+
+## 🐛 Known Bugs / Limitations
+
+### - Magnifier window does not automatically update its size or position.
+  After adjusting zoom or coordinates in the main app, the magnifier must be restarted manually or the stated toogled between passthrough because the window is not yet reactive to changes in configuration. The window size (inner_size) and position (viewport.position) are only applied when the binary (lupa.exe) launches.
 
 ---
 
