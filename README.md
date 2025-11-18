@@ -9,7 +9,7 @@ The tool allows users to reposition and resize the magnified area, control zoom 
 All settings are saved automatically, providing a flexible and customizable interface tailored to visually impaired users.
 Its modular multi-binary architecture ensures smooth operation, whether selecting areas, magnifying content, or adjusting configurations.
 
-![](./assets/placeholder-main-image.png)
+![Description gif image](./assets/area-selector-gif.gif)
 
 ---
 
@@ -92,7 +92,7 @@ as they depend on shared resources and configuration files.
 
 ## 👑 Demonstration
 
-![](./assets/placeholder-demo.gif)
+![Description gif image](./assets/area-selector-gif.gif)
 
 ---
 
@@ -100,9 +100,9 @@ as they depend on shared resources and configuration files.
 
 | Feature | Preview | Description |
 |--------|---------|-------------|
-| Area Selection Tool | ![](./assets/placeholder-gif1.gif) | Fullscreen drag-to-select with live preview |
-| Magnifier Window | ![](./assets/placeholder-gif2.gif) | Zoomed region with adjustable zoom factor |
-| Passthrough Mode | ![](./assets/placeholder-gif3.gif) | Lets clicks pass through the magnifier window |
+| Area Selection Tool | ![Area Selection Tool image](./assets/area-selector-tool.jpg) | Fullscreen drag-to-select with live preview |
+| Magnifier Window | ![Magnifier Window image](./assets/magnifier-window.jpg) | Zoomed region with adjustable zoom factor |
+| Passthrough Mode | ![Passthrough Mode image](./assets/passthrough-window.jpg) | Lets clicks pass through the magnifier window |
 
 ---
 
