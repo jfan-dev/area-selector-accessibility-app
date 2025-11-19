@@ -2,7 +2,7 @@
 
 ## 🌐 Description
 
-This application is designed to assist users with limited field of view or visual accessibility needs.
+This application is designed to assist video game players with limited field of view or visual accessibility needs.
 It enables precise selection of any region on the screen and magnifies it through an adjustable, accessibility-friendly zoom window (“Lupa”).
 
 The tool allows users to reposition and resize the magnified area, control zoom intensity, and toggle passthrough mode (allowing clicks to pass through the magnifier).
@@ -10,6 +10,11 @@ All settings are saved automatically, providing a flexible and customizable inte
 Its modular multi-binary architecture ensures smooth operation, whether selecting areas, magnifying content, or adjusting configurations.
 
 ![Description gif image](./assets/area-selector-gif.gif)
+
+---
+
+### 🦉 How a Player With Low Vision Sees the Game
+![Description gif image](./assets/tunnel-vision.jpg)
 
 ---
 
