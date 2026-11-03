@@ -1,11 +1,20 @@
 use crate::capture::ScreenCapture;
-use crate::config::BorderPreset;
-use crate::{config, i18n, icon};
-use eframe::egui::{self, Color32, Frame, TextureHandle, TextureOptions, Vec2, ViewportBuilder};
+use crate::config::{BorderPreset, LUPA_ZOOM_RANGE};
+use crate::i18n::{self, Strings};
+use crate::{config, icon};
+use eframe::egui::{
+    self, vec2, Align2, Color32, CornerRadius, Event, FontId, Frame, Key, MouseWheelUnit, Sense,
+    Stroke, StrokeKind, TextureHandle, TextureOptions, Vec2, ViewportBuilder, ViewportCommand,
+};
 use std::time::Duration;
 
 /// Screen region magnified by the lupa: `(x, y, width, height)` in physical pixels.
 pub type CaptureRect = (u32, u32, u32, u32);
+
+/// Zoom change per mouse-wheel notch or +/− key press.
+pub const ZOOM_STEP: f32 = 0.25;
+/// Trackpad scrolling (in points) that counts as one wheel notch.
+const POINTS_PER_WHEEL_STEP: f32 = 50.0;
 
 /// Result of one frame of the magnifier.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -15,8 +24,21 @@ pub enum LupaOutcome {
     Closed,
 }
 
+/// Changes made directly on the magnifier (drag, wheel, keys) that the panel should
+/// copy into the settings. Taken with [`LupaApp::take_user_changes`].
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct UserChanges {
+    pub zoom: Option<f32>,
+    pub position: Option<[f32; 2]>,
+    pub passthrough: Option<bool>,
+}
+
 /// Magnifier window state. All fields that affect the window (zoom, position,
 /// passthrough, frame rate) can be changed while it is open; the next frame applies them.
+///
+/// Changes made on the magnifier itself are applied by the magnifier with its own window
+/// commands, so they work even while the panel is minimized, and reported through
+/// [`UserChanges`].
 pub struct LupaApp {
     pub area: CaptureRect,
     /// True magnification: 2.0 shows every captured pixel as 2×2 screen pixels,
@@ -30,13 +52,19 @@ pub struct LupaApp {
     /// Border colours `(interactive, passthrough)` and thickness in points.
     pub border_colors: (Color32, Color32),
     pub border_width: f32,
-    /// Shown until the first frame has been captured.
-    pub loading_text: &'static str,
+    /// Show the interactive/passthrough badge (state is never shown by colour alone).
+    pub show_mode_badge: bool,
+    /// Texts (loading, hover hint, badge).
+    pub strings: &'static Strings,
     /// Display scale of the magnifier's monitor, refreshed every frame.
     pixels_per_point: f32,
     capture: Option<ScreenCapture>,
     texture: Option<TextureHandle>,
     excluded_from_capture: bool,
+    changes: UserChanges,
+    /// After a drag started, follow the window position the OS reports.
+    following_drag: bool,
+    wheel_accumulator: f32,
 }
 
 impl LupaApp {
@@ -57,11 +85,34 @@ impl LupaApp {
             frame_interval: Duration::from_secs(1) / config::DEFAULT_LUPA_FPS,
             border_colors: BorderPreset::default().colors(),
             border_width: 3.0,
-            loading_text: i18n::PT.lupa_loading,
+            show_mode_badge: true,
+            strings: &i18n::PT,
             pixels_per_point,
             capture: None,
             texture: None,
             excluded_from_capture: false,
+            changes: UserChanges::default(),
+            following_drag: false,
+            wheel_accumulator: 0.0,
+        }
+    }
+
+    /// Changes made on the magnifier since the last call.
+    pub fn take_user_changes(&mut self) -> UserChanges {
+        std::mem::take(&mut self.changes)
+    }
+
+    /// Switches to a new capture area. The capture buffers are rebuilt for the new size on
+    /// the next frame, and the window resizes through the next viewport builder.
+    pub fn set_area(&mut self, area: CaptureRect) {
+        self.area = area;
+    }
+
+    /// Moves the window to `position` (set by the panel). Stops following a drag.
+    pub fn set_position(&mut self, position: [f32; 2]) {
+        if position != self.position {
+            self.position = position;
+            self.following_drag = false;
         }
     }
 
@@ -108,6 +159,75 @@ impl LupaApp {
         }
     }
 
+    fn zoom_by_user(&mut self, ctx: &egui::Context, steps: i32) {
+        let zoom = step_zoom(self.zoom, steps);
+        if zoom != self.zoom {
+            self.zoom = zoom;
+            self.changes.zoom = Some(zoom);
+            ctx.send_viewport_cmd(ViewportCommand::InnerSize(self.display_size()));
+        }
+    }
+
+    fn move_by_user(&mut self, ctx: &egui::Context, delta: Vec2) {
+        self.position = [self.position[0] + delta.x, self.position[1] + delta.y];
+        self.changes.position = Some(self.position);
+        self.following_drag = false;
+        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(self.position.into()));
+    }
+
+    /// Wheel, keyboard and drag-follow handling (interactive mode only: a passthrough
+    /// window receives no input).
+    fn handle_input(&mut self, ctx: &egui::Context) {
+        if self.passthrough {
+            return;
+        }
+        let (events, shift) = ctx.input(|i| (i.events.clone(), i.modifiers.shift));
+        let mut zoom_steps = 0;
+        let mut movement = Vec2::ZERO;
+        let move_step = if shift { 10.0 } else { 1.0 };
+        for event in &events {
+            match event {
+                Event::MouseWheel { unit, delta, .. } => {
+                    zoom_steps += wheel_steps(&mut self.wheel_accumulator, *unit, delta.y);
+                }
+                Event::Key {
+                    key, pressed: true, ..
+                } => match key {
+                    Key::Plus | Key::Equals => zoom_steps += 1,
+                    Key::Minus => zoom_steps -= 1,
+                    Key::ArrowLeft => movement.x -= move_step,
+                    Key::ArrowRight => movement.x += move_step,
+                    Key::ArrowUp => movement.y -= move_step,
+                    Key::ArrowDown => movement.y += move_step,
+                    Key::P => {
+                        self.passthrough = true;
+                        self.changes.passthrough = Some(true);
+                        ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(true));
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        if zoom_steps != 0 {
+            self.zoom_by_user(ctx, zoom_steps);
+        }
+        if movement != Vec2::ZERO {
+            self.move_by_user(ctx, movement);
+        }
+
+        // While/after an OS drag, adopt the position the window actually has.
+        if self.following_drag {
+            if let Some(outer) = ctx.input(|i| i.viewport().outer_rect) {
+                let position = [outer.min.x.round(), outer.min.y.round()];
+                if position != self.position {
+                    self.position = position;
+                    self.changes.position = Some(position);
+                }
+            }
+        }
+    }
+
     /// Captures the area, draws it zoomed, and reports whether the window should close.
     pub fn ui(&mut self, ui: &mut egui::Ui) -> LupaOutcome {
         let ctx = &ui.ctx().clone();
@@ -115,6 +235,7 @@ impl LupaApp {
         if !self.excluded_from_capture {
             self.excluded_from_capture = exclude_own_window_from_capture(Self::TITLE);
         }
+        self.handle_input(ctx);
         self.update_texture(ctx);
 
         let display_size = self.display_size();
@@ -127,7 +248,18 @@ impl LupaApp {
                 if let Some(tex) = &self.texture {
                     ui.image((tex.id(), display_size));
                 } else {
-                    ui.label(self.loading_text);
+                    ui.label(self.strings.lupa_loading);
+                }
+
+                // Drag anywhere to move the window (interactive mode).
+                let response = ui.interact(
+                    rect,
+                    ui.scope_id().with("lupa_drag"),
+                    Sense::click_and_drag(),
+                );
+                if response.drag_started() && !self.passthrough {
+                    ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                    self.following_drag = true;
                 }
 
                 let (interactive, passthrough) = self.border_colors;
@@ -138,18 +270,112 @@ impl LupaApp {
                 };
                 painter.rect_stroke(
                     rect,
-                    egui::CornerRadius::ZERO,
-                    egui::Stroke::new(self.border_width, color),
-                    egui::StrokeKind::Middle,
+                    CornerRadius::ZERO,
+                    Stroke::new(self.border_width, color),
+                    StrokeKind::Middle,
                 );
+
+                // Badge and hint follow the panel's text size setting.
+                let small = egui::TextStyle::Small.resolve(ui.style());
+                if self.show_mode_badge {
+                    let text = if self.passthrough {
+                        self.strings.badge_passthrough
+                    } else {
+                        self.strings.badge_interactive
+                    };
+                    let inset = self.border_width + 4.0;
+                    draw_badge(
+                        &painter,
+                        rect.min + vec2(inset, inset),
+                        text,
+                        color,
+                        small.clone(),
+                    );
+                }
+
+                if response.hovered() && !self.passthrough {
+                    let inset = self.border_width + 4.0;
+                    draw_hint(
+                        &painter,
+                        rect.center_bottom() - vec2(0.0, inset),
+                        rect.width() - 2.0 * inset,
+                        self.strings.lupa_hint,
+                        small,
+                    );
+                }
             });
 
         ctx.request_repaint_after(self.frame_interval);
 
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.viewport().close_requested()) {
+        if ctx.input(|i| i.key_pressed(Key::Escape) || i.viewport().close_requested()) {
             LupaOutcome::Closed
         } else {
             LupaOutcome::Open
+        }
+    }
+}
+
+/// Small label in the top-left corner: the mode in words, framed in the border colour.
+fn draw_badge(
+    painter: &egui::Painter,
+    top_left: egui::Pos2,
+    text: &str,
+    color: Color32,
+    font: FontId,
+) {
+    let galley = painter.layout_no_wrap(text.to_owned(), font, Color32::WHITE);
+    let rect = egui::Rect::from_min_size(top_left, galley.size() + vec2(12.0, 6.0));
+    painter.rect(
+        rect,
+        4,
+        Color32::from_black_alpha(200),
+        Stroke::new(2.0, color),
+        StrokeKind::Inside,
+    );
+    painter.galley(rect.min + vec2(6.0, 3.0), galley, Color32::WHITE);
+}
+
+/// Usage hint at the bottom while the mouse is over an interactive magnifier.
+fn draw_hint(
+    painter: &egui::Painter,
+    bottom_center: egui::Pos2,
+    max_width: f32,
+    text: &str,
+    font: FontId,
+) {
+    let galley = painter.layout(text.to_owned(), font, Color32::WHITE, max_width.max(60.0));
+    let size = galley.size() + vec2(12.0, 6.0);
+    let rect = Align2::CENTER_BOTTOM.anchor_size(bottom_center, size);
+    painter.rect_filled(rect, 4, Color32::from_black_alpha(190));
+    painter.galley(rect.min + vec2(6.0, 3.0), galley, Color32::WHITE);
+}
+
+/// Zoom after `steps` notches (positive = in), kept in [`LUPA_ZOOM_RANGE`].
+pub fn step_zoom(zoom: f32, steps: i32) -> f32 {
+    let (min, max) = (*LUPA_ZOOM_RANGE.start(), *LUPA_ZOOM_RANGE.end());
+    (zoom + steps as f32 * ZOOM_STEP).clamp(min, max)
+}
+
+/// Converts one mouse-wheel event to zoom steps (wheel up = zoom in). A mouse sends
+/// one event per notch (lines); trackpads send many small ones (points), which are
+/// accumulated so one step needs [`POINTS_PER_WHEEL_STEP`] of scrolling.
+pub fn wheel_steps(accumulator: &mut f32, unit: MouseWheelUnit, delta_y: f32) -> i32 {
+    match unit {
+        MouseWheelUnit::Line | MouseWheelUnit::Page => {
+            *accumulator = 0.0;
+            if delta_y > 0.0 {
+                1
+            } else if delta_y < 0.0 {
+                -1
+            } else {
+                0
+            }
+        }
+        MouseWheelUnit::Point => {
+            *accumulator += delta_y;
+            let steps = (*accumulator / POINTS_PER_WHEEL_STEP).trunc();
+            *accumulator -= steps * POINTS_PER_WHEEL_STEP;
+            steps as i32
         }
     }
 }
@@ -252,6 +478,34 @@ fn exclude_own_window_from_capture(title: &str) -> bool {
 mod tests {
     use super::*;
     use egui::vec2;
+
+    #[test]
+    fn zoom_steps_are_clamped() {
+        assert_eq!(step_zoom(1.0, 1), 1.25);
+        assert_eq!(step_zoom(1.0, -2), 0.5);
+        assert_eq!(step_zoom(4.9, 3), 5.0);
+        assert_eq!(step_zoom(0.6, -5), 0.5);
+    }
+
+    #[test]
+    fn mouse_wheel_notches_are_one_step_each() {
+        let mut acc = 0.0;
+        assert_eq!(wheel_steps(&mut acc, MouseWheelUnit::Line, 3.0), 1);
+        assert_eq!(wheel_steps(&mut acc, MouseWheelUnit::Line, -1.0), -1);
+    }
+
+    #[test]
+    fn trackpad_scrolling_is_accumulated() {
+        let mut acc = 0.0;
+        assert_eq!(wheel_steps(&mut acc, MouseWheelUnit::Point, 20.0), 0);
+        assert_eq!(wheel_steps(&mut acc, MouseWheelUnit::Point, 20.0), 0);
+        assert_eq!(
+            wheel_steps(&mut acc, MouseWheelUnit::Point, 20.0),
+            1,
+            "60 points"
+        );
+        assert_eq!(wheel_steps(&mut acc, MouseWheelUnit::Point, -120.0), -2);
+    }
 
     #[test]
     fn display_size_accounts_for_zoom_and_scaling() {

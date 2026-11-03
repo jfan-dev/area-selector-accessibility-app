@@ -1,16 +1,22 @@
-use crate::{capture, i18n, icon, model::Area};
+use crate::i18n::{self, Strings};
+use crate::{capture, icon, model::Area};
 use eframe::egui::{self, *};
+use std::time::{Duration, Instant};
 
 /// Result of one frame of the area selector.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SelectorOutcome {
     /// Still waiting for the user to finish a drag.
     Pending,
-    /// The user released the mouse after dragging. Area is in physical pixels.
+    /// The user released the mouse after dragging. Area is in physical pixels and at
+    /// least [`crate::model::MIN_AREA_SIZE`] on each side.
     Selected(Area),
-    /// The user pressed ESC or closed the window.
+    /// The user pressed ESC, right-clicked or closed the window.
     Cancelled,
 }
+
+/// How long the "area too small" message stays visible.
+const TOO_SMALL_MESSAGE: Duration = Duration::from_millis(2500);
 
 /// Fullscreen drag-to-select overlay.
 ///
@@ -18,14 +24,15 @@ pub enum SelectorOutcome {
 /// with the selected region shown at full brightness. This does not depend on window
 /// transparency: secondary windows were not see-through with eframe's glow renderer
 /// on Windows (found with eframe 0.26; not re-tested after the upgrade to 0.37).
-#[derive(Default)]
 pub struct AreaSelector {
     selecting: bool,
     start: Option<Pos2>,
     end: Option<Pos2>,
     screenshot: Option<ColorImage>,
     texture: Option<TextureHandle>,
-    hint: &'static str,
+    strings: &'static Strings,
+    /// Set when a selection was rejected for being too small.
+    too_small_until: Option<Instant>,
 }
 
 impl AreaSelector {
@@ -40,15 +47,19 @@ impl AreaSelector {
             log::warn!("selector screenshot failed; using a plain overlay");
         }
         Self {
+            selecting: false,
+            start: None,
+            end: None,
             screenshot,
-            hint: i18n::PT.selector_hint,
-            ..Self::default()
+            texture: None,
+            strings: &i18n::PT,
+            too_small_until: None,
         }
     }
 
-    /// Sets the instructions shown at the top of the overlay (translated text).
-    pub fn with_hint(mut self, hint: &'static str) -> Self {
-        self.hint = hint;
+    /// Sets the language of the instructions and messages.
+    pub fn with_strings(mut self, strings: &'static Strings) -> Self {
+        self.strings = strings;
         self
     }
 
@@ -83,6 +94,8 @@ impl AreaSelector {
         let ctx = &ui.ctx().clone();
         let mut outcome = SelectorOutcome::Pending;
         let background = self.background(ctx);
+        let ppp = ctx.pixels_per_point();
+        ctx.set_cursor_icon(CursorIcon::Crosshair);
 
         CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
             let rect = ui.max_rect();
@@ -106,6 +119,7 @@ impl AreaSelector {
                     if !self.selecting {
                         self.selecting = true;
                         self.start = Some(pos);
+                        self.too_small_until = None;
                     }
                     self.end = Some(pos);
                 }
@@ -115,9 +129,16 @@ impl AreaSelector {
                     let area = Area {
                         start: start.into(),
                         end: end.into(),
-                    };
-                    let ppp = ctx.pixels_per_point();
-                    outcome = SelectorOutcome::Selected(area.to_physical(ppp));
+                    }
+                    .to_physical(ppp);
+                    if area.is_usable() {
+                        outcome = SelectorOutcome::Selected(area);
+                    } else {
+                        // A click or a tiny drag: keep the overlay open and explain.
+                        self.start = None;
+                        self.end = None;
+                        self.too_small_until = Some(Instant::now() + TOO_SMALL_MESSAGE);
+                    }
                 }
             }
 
@@ -138,23 +159,82 @@ impl AreaSelector {
                     Stroke::new(2.0_f32, Color32::from_rgb(80, 140, 255)),
                     StrokeKind::Middle,
                 );
+                // Live size in physical pixels, next to the cursor.
+                let w = (selection.width() * ppp).round() as u32;
+                let h = (selection.height() * ppp).round() as u32;
+                let text = (self.strings.selector_size)(w, h);
+                draw_label(&painter, ui, end + vec2(16.0, 16.0), &text, Color32::WHITE);
             }
 
-            ui.label(
-                RichText::new(self.hint)
-                    .color(Color32::WHITE)
-                    .background_color(Color32::from_black_alpha(160)),
-            );
+            self.banner(ui);
         });
 
-        if ctx.input(|i| i.key_pressed(Key::Escape) || i.viewport().close_requested()) {
+        if ctx.input(|i| {
+            i.key_pressed(Key::Escape)
+                || i.pointer.secondary_clicked()
+                || i.viewport().close_requested()
+        }) {
             outcome = SelectorOutcome::Cancelled;
         }
 
-        // No timed repaint: egui repaints on every mouse/keyboard event, which is all
-        // the selector needs (it used to redraw every 30 ms).
+        // No timed repaint while idle: egui repaints on every mouse/keyboard event.
+        if let Some(until) = self.too_small_until {
+            let now = Instant::now();
+            if now < until {
+                ctx.request_repaint_after(until - now);
+            } else {
+                self.too_small_until = None;
+            }
+        }
         outcome
     }
+
+    /// Instructions at the top (larger than body text), plus the "too small" message.
+    fn banner(&self, ui: &mut Ui) {
+        Frame::NONE
+            .fill(Color32::from_black_alpha(200))
+            .inner_margin(Margin::symmetric(16, 10))
+            .corner_radius(6)
+            .outer_margin(Margin::same(12))
+            .show(ui, |ui| {
+                let size = ui.text_style_height(&TextStyle::Heading) * 0.85;
+                ui.label(
+                    RichText::new(self.strings.selector_hint)
+                        .size(size)
+                        .color(Color32::WHITE),
+                );
+                if self.too_small_until.is_some() {
+                    ui.label(
+                        RichText::new(self.strings.selector_too_small)
+                            .size(size)
+                            .color(Color32::from_rgb(255, 209, 102))
+                            .strong(),
+                    );
+                }
+            });
+    }
+}
+
+/// Text on a dark rounded background, kept inside the window.
+fn draw_label(painter: &Painter, ui: &Ui, pos: Pos2, text: &str, color: Color32) {
+    let font = TextStyle::Body.resolve(ui.style());
+    let galley = painter.layout_no_wrap(text.to_owned(), font, color);
+    let size = galley.size() + vec2(16.0, 8.0);
+    let bounds = painter.clip_rect();
+    // Flip to the other side of the cursor near the right/bottom edges.
+    let x = if pos.x + size.x > bounds.right() {
+        pos.x - size.x - 32.0
+    } else {
+        pos.x
+    };
+    let y = if pos.y + size.y > bounds.bottom() {
+        pos.y - size.y - 32.0
+    } else {
+        pos.y
+    };
+    let rect = Rect::from_min_size(pos2(x, y), size);
+    painter.rect_filled(rect, 6, Color32::from_black_alpha(210));
+    painter.galley(rect.min + vec2(8.0, 4.0), galley, color);
 }
 
 /// Primary monitor size in points, falling back to the Win32 screen metrics when

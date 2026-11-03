@@ -84,7 +84,7 @@ fn run_selector(cfg: AppConfig, s: &'static Strings) -> eframe::Result {
     }
 
     // Screenshot is taken before the overlay window exists.
-    let selector = AreaSelector::capture_screen().with_hint(s.selector_hint);
+    let selector = AreaSelector::capture_screen().with_strings(s);
     let options = eframe::NativeOptions {
         viewport: AreaSelector::viewport_builder(ui_selector::primary_screen_size_px()),
         ..Default::default()
@@ -130,7 +130,8 @@ fn run_lupa(args: LupaArgs, mut cfg: AppConfig, s: &'static Strings) -> eframe::
     lupa.frame_interval = cfg.lupa_frame_interval();
     lupa.border_colors = cfg.appearance.border_preset.colors();
     lupa.border_width = cfg.appearance.border_width;
-    lupa.loading_text = s.lupa_loading;
+    lupa.strings = s;
+    lupa.show_mode_badge = cfg.appearance.show_mode_badge;
     let options = eframe::NativeOptions {
         viewport: lupa.viewport_builder(),
         ..Default::default()

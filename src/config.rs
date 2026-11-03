@@ -71,6 +71,8 @@ pub struct Appearance {
     pub border_preset: BorderPreset,
     /// Magnifier border thickness in points.
     pub border_width: f32,
+    /// Show the interactive/passthrough badge in the magnifier corner.
+    pub show_mode_badge: bool,
 }
 
 impl Default for Appearance {
@@ -81,6 +83,7 @@ impl Default for Appearance {
             ui_scale: 1.0,
             border_preset: BorderPreset::GreenGrey,
             border_width: 3.0,
+            show_mode_badge: true,
         }
     }
 }
@@ -283,6 +286,7 @@ mod tests {
                 ui_scale: 1.5,
                 border_preset: BorderPreset::BlueOrange,
                 border_width: 6.0,
+                show_mode_badge: false,
             },
         };
         save_config_to(&path, &cfg).unwrap();

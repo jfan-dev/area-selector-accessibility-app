@@ -199,6 +199,7 @@ impl App {
 
             ui.add_space(4.0);
             self.position_controls(ui, s);
+            ui.weak(s.lupa_drag_tip);
         });
 
         ui.add_space(4.0);
@@ -399,6 +400,14 @@ impl App {
                     ui.radio_value(&mut appearance.border_preset, preset, name);
                 }
             });
+            toggle_switch(
+                ui,
+                &mut appearance.show_mode_badge,
+                s.show_badge,
+                s.on,
+                s.off,
+            )
+            .on_hover_text(s.show_badge_tip);
             let (interactive, passthrough) = appearance.border_preset.colors();
             let needed =
                 swatch_width(ui, s.border_interactive) + swatch_width(ui, s.border_passthrough);

@@ -131,7 +131,15 @@ pub struct Strings {
 
     // Selector and magnifier windows
     pub selector_hint: &'static str,
+    pub selector_too_small: &'static str,
+    pub selector_size: fn(u32, u32) -> String,
     pub lupa_loading: &'static str,
+    pub lupa_hint: &'static str,
+    pub badge_interactive: &'static str,
+    pub badge_passthrough: &'static str,
+    pub lupa_drag_tip: &'static str,
+    pub show_badge: &'static str,
+    pub show_badge_tip: &'static str,
 
     // Command line
     pub cli_usage: &'static str,
@@ -224,8 +232,16 @@ pub static PT: Strings = Strings {
     saved_area: "✔ Área salva",
     save_error: |err| format!("⚠ Erro ao salvar as configurações: {err}"),
 
-    selector_hint: "Clique e arraste para selecionar uma área. ESC cancela.",
+    selector_hint: "Clique e arraste para selecionar uma área. ESC ou botão direito cancela.",
+    selector_too_small: "Área muito pequena: arraste um retângulo maior.",
+    selector_size: |w, h| format!("{w} × {h} px"),
     lupa_loading: "⌛ Carregando...",
+    lupa_hint: "Arraste para mover · Roda do mouse ou +/−: zoom · Setas: mover · P: passthrough · Esc: fechar",
+    badge_interactive: "Interativa",
+    badge_passthrough: "Passthrough",
+    lupa_drag_tip: "Dica: arraste a lupa para movê-la e use a roda do mouse sobre ela para o zoom.",
+    show_badge: "Indicador de modo",
+    show_badge_tip: "Mostra no canto da lupa se ela está interativa ou em passthrough, além da cor da borda.",
 
     cli_usage: "\
 Uso:
@@ -322,8 +338,16 @@ pub static EN: Strings = Strings {
     saved_area: "✔ Area saved",
     save_error: |err| format!("⚠ Could not save the settings: {err}"),
 
-    selector_hint: "Click and drag to select an area. ESC cancels.",
+    selector_hint: "Click and drag to select an area. ESC or right-click cancels.",
+    selector_too_small: "Area too small: drag a larger rectangle.",
+    selector_size: |w, h| format!("{w} × {h} px"),
     lupa_loading: "⌛ Loading...",
+    lupa_hint: "Drag to move · Mouse wheel or +/−: zoom · Arrows: move · P: passthrough · Esc: close",
+    badge_interactive: "Interactive",
+    badge_passthrough: "Passthrough",
+    lupa_drag_tip: "Tip: drag the magnifier to move it, and use the mouse wheel over it to zoom.",
+    show_badge: "Mode indicator",
+    show_badge_tip: "Shows in a corner of the magnifier whether it is interactive or in passthrough, besides the border colour.",
 
     cli_usage: "\
 Usage:
@@ -418,6 +442,13 @@ mod tests {
             s.saved_settings,
             s.saved_area,
             s.selector_hint,
+            s.selector_too_small,
+            s.lupa_hint,
+            s.badge_interactive,
+            s.badge_passthrough,
+            s.lupa_drag_tip,
+            s.show_badge,
+            s.show_badge_tip,
             s.lupa_loading,
             s.cli_usage,
             s.cli_error,
@@ -477,6 +508,7 @@ mod tests {
             let s = tr(lang);
             let mut texts: Vec<String> = static_strings(s).iter().map(|t| t.to_string()).collect();
             texts.push((s.chip_area)(300, 200));
+            texts.push((s.selector_size)(300, 200));
             texts.push((s.cli_area_saved)(1, 2, 3, 4));
             texts.push((s.cli_position_saved)(1.0, 2.0));
             texts.push(panel_symbols.to_owned());

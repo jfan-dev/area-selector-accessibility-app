@@ -171,8 +171,8 @@ impl App {
     fn open_selector(&mut self) {
         if self.selector.is_none() {
             // Screenshot is taken now, before the overlay window exists.
-            let hint = self.strings().selector_hint;
-            self.selector = Some(AreaSelector::capture_screen().with_hint(hint));
+            let strings = self.strings();
+            self.selector = Some(AreaSelector::capture_screen().with_strings(strings));
         }
     }
 
@@ -189,6 +189,10 @@ impl App {
             SelectorOutcome::Selected(area) => {
                 self.saved_area = Some(area);
                 self.config.area = Some(area);
+                // An open magnifier switches to the new area right away.
+                if let Some(lupa) = &self.lupa {
+                    lock(lupa).app.set_area(area.to_rect_px());
+                }
                 self.save_now(Some(self.strings().saved_area));
                 self.selector = None;
             }
@@ -203,29 +207,46 @@ impl App {
         }
     }
 
+    /// Changes made on the magnifier itself (drag, wheel, keys) become settings (and are
+    /// auto-saved). The magnifier already applied them to its own window.
+    fn pull_lupa_changes(&mut self) {
+        let Some(lupa) = &self.lupa else {
+            return;
+        };
+        let changes = lock(lupa).app.take_user_changes();
+        if let Some(zoom) = changes.zoom {
+            self.config.lupa_zoom = zoom;
+        }
+        if let Some([x, y]) = changes.position {
+            self.config.lupa_pos_x = x;
+            self.config.lupa_pos_y = y;
+        }
+        if let Some(passthrough) = changes.passthrough {
+            self.config.lupa_passthrough = passthrough;
+        }
+    }
+
     fn show_lupa(&mut self, ctx: &egui::Context) {
-        let position = self.lupa_position();
-        let zoom = self.config.lupa_zoom;
-        let passthrough = self.config.lupa_passthrough;
-        let frame_interval = self.config.lupa_frame_interval();
-        let border_colors = self.config.appearance.border_preset.colors();
-        let border_width = self.config.appearance.border_width;
-        let loading_text = self.strings().lupa_loading;
+        self.pull_lupa_changes();
+        let strings = self.strings();
         let Some(lupa) = &self.lupa else {
             return;
         };
 
         let builder = {
             let mut state = lock(lupa);
-            // Live updates: panel changes apply to the open magnifier immediately.
             let app = &mut state.app;
-            app.zoom = zoom;
-            app.position = position;
-            app.passthrough = passthrough;
-            app.frame_interval = frame_interval;
-            app.border_colors = border_colors;
-            app.border_width = border_width;
-            app.loading_text = loading_text;
+
+            // Panel settings apply to the open magnifier immediately.
+            let config = &self.config;
+            app.zoom = config.lupa_zoom;
+            app.set_position([config.lupa_pos_x, config.lupa_pos_y]);
+            app.passthrough = config.lupa_passthrough;
+            app.frame_interval = config.lupa_frame_interval();
+            app.border_colors = config.appearance.border_preset.colors();
+            app.border_width = config.appearance.border_width;
+            app.show_mode_badge = config.appearance.show_mode_badge;
+            app.strings = strings;
             app.viewport_builder()
         };
 
@@ -257,6 +278,8 @@ impl eframe::App for App {
 
     /// Saves a change made less than [`config::AUTOSAVE_DELAY`] before closing.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Include changes made on the magnifier while the panel wasn't drawing.
+        self.pull_lupa_changes();
         if self.autosave.has_unsaved_changes(&self.config) {
             if let Err(err) = config::save_config(&self.config) {
                 log::error!("could not save config on exit: {err}");

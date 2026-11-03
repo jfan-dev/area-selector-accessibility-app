@@ -25,7 +25,17 @@ pub struct Area {
     pub end: SerializablePos,
 }
 
+/// Smallest selectable area side, in physical pixels. A plain click would otherwise
+/// save a 0×0 area and the magnifier could never show anything.
+pub const MIN_AREA_SIZE: u32 = 16;
+
 impl Area {
+    /// True if the area is large enough to magnify (see [`MIN_AREA_SIZE`]).
+    pub fn is_usable(&self) -> bool {
+        let (_, _, w, h) = self.to_rect_px();
+        w >= MIN_AREA_SIZE && h >= MIN_AREA_SIZE
+    }
+
     /// Converts an area measured in egui points to physical pixels, the unit that
     /// screen capture uses. Needed on displays with Windows scaling above 100%.
     pub fn to_physical(&self, pixels_per_point: f32) -> Self {
@@ -83,6 +93,14 @@ mod tests {
     #[test]
     fn rect_rounds_fractional_coordinates() {
         assert_eq!(area(10.4, 20.6, 50.5, 40.2).to_rect_px(), (10, 21, 40, 20));
+    }
+
+    #[test]
+    fn tiny_areas_are_not_usable() {
+        assert!(!area(5.0, 5.0, 5.0, 5.0).is_usable(), "a click");
+        assert!(!area(0.0, 0.0, 300.0, 10.0).is_usable(), "too thin");
+        assert!(area(0.0, 0.0, 16.0, 16.0).is_usable(), "minimum size");
+        assert!(area(300.0, 200.0, 0.0, 0.0).is_usable(), "reverse drag");
     }
 
     #[test]
