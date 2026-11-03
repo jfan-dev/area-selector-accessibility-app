@@ -1,0 +1,8 @@
+# Cross-compiling Windows binaries from Linux / WSL (requires mingw-w64).
+# Native Windows builds are unaffected: plain `cargo build` still uses the host target.
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+
+[alias]
+wbuild = "build --target x86_64-pc-windows-gnu"
+wrun = "run --target x86_64-pc-windows-gnu"

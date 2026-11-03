@@ -37,7 +37,7 @@ git clone https://github.com/jfan-dev/area-selector-accessibility-app.git
 
 ```bash
 # Access the project folder
-cd area_selector/
+cd area-selector-accessibility-app/
 
 # Build in debug mode
 cargo build
@@ -66,12 +66,38 @@ cargo run --bin lupa -- <x> <y> <width> <height> [zoom|passthrough] [pos_x pos_y
 
 ---
 
+### 🐧 Building From Linux / WSL (Ubuntu)
+
+The app uses the Windows API, so it only runs on Windows — but you can develop and cross-compile it from Linux or WSL2.
+On WSL, the resulting `.exe` files can be launched straight from the Linux shell and open on the Windows desktop.
+
+```bash
+# 1. Install the MinGW-w64 cross-compiler
+sudo apt update && sudo apt install -y build-essential mingw-w64
+
+# 2. Install Rust and the Windows GNU target
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup target add x86_64-pc-windows-gnu
+
+# 3. Build (aliases defined in .cargo/config.toml)
+cargo wbuild --release
+# → target/x86_64-pc-windows-gnu/release/{area_selector,seletor,lupa}.exe
+
+# 4. Run (WSL only — opens on the Windows desktop)
+cargo wrun --release --bin area_selector
+```
+
+If running from inside the WSL filesystem is slow, copy the release folder to the Windows side
+(e.g. `/mnt/c/Users/<you>/area-selector/`) and run `area_selector.exe` from there.
+
+---
+
 ### ▶️ Running From Release Build (No Rust Required)
 
 If you prefer not to compile the project, you can run it directly using the pre-built binaries:
 
-1. Download the **`target/release`** folder (or extract it from a release ZIP).
-2. Inside this folder, run the main executable:
+1. Download the release ZIP from the [GitHub Releases](https://github.com/jfan-dev/area-selector-accessibility-app/releases) page and extract it.
+2. Inside the extracted folder, run the main executable:
 
    **`area_selector.exe`**  
    Launches the main control panel for selecting areas and starting the magnifier.
