@@ -10,14 +10,6 @@ path = "src/lib.rs"
 name = "area_selector"
 path = "src/main.rs"
 
-[[bin]]
-name = "lupa"
-path = "bin/lupa_main.rs"
-
-[[bin]]
-name = "seletor"
-path = "bin/seletor_main.rs"
-
 [dependencies]
 eframe = "0.26"
 serde = { version = "1.0", features = ["derive"] }
@@ -29,5 +21,6 @@ windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
 ] }
 

@@ -43,7 +43,7 @@ cd area-selector-accessibility-app/
 cargo build
 
 # Run the main window (panel with buttons)
-cargo run --bin area_selector
+cargo run
 ```
 
 ---
@@ -52,7 +52,7 @@ cargo run --bin area_selector
 
 ```bash
 # Fullscreen tool to select the screen area
-cargo run --bin seletor
+cargo run -- seletor
 ```
 
 ---
@@ -61,7 +61,7 @@ cargo run --bin seletor
 
 ```bash
 # Start the magnifier window with area/zoom/position
-cargo run --bin lupa -- <x> <y> <width> <height> [zoom|passthrough] [pos_x pos_y]
+cargo run -- lupa <x> <y> <width> <height> [zoom|passthrough] [pos_x pos_y]
 ```
 
 ---
@@ -81,10 +81,10 @@ rustup target add x86_64-pc-windows-gnu
 
 # 3. Build (aliases defined in .cargo/config.toml)
 cargo wbuild --release
-# → target/x86_64-pc-windows-gnu/release/{area_selector,seletor,lupa}.exe
+# → target/x86_64-pc-windows-gnu/release/area_selector.exe
 
 # 4. Run (WSL only — opens on the Windows desktop)
-cargo wrun --release --bin area_selector
+cargo wrun --release
 
 # Checks (tests run as Windows executables through WSL interop)
 cargo wtest
