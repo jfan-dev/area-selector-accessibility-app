@@ -5,9 +5,9 @@
 This application is designed to assist video game players with limited field of view or visual accessibility needs.
 It enables precise selection of any region on the screen and magnifies it through an adjustable, accessibility-friendly zoom window (“Lupa”).
 
-The tool allows users to reposition and resize the magnified area, control zoom intensity, and toggle passthrough mode (allowing clicks to pass through the magnifier).
-All settings are saved automatically, providing a flexible and customizable interface tailored to visually impaired users.
-Its modular multi-binary architecture ensures smooth operation, whether selecting areas, magnifying content, or adjusting configurations.
+The tool allows users to reposition and resize the magnified area, control zoom intensity and refresh rate, and toggle passthrough mode (allowing clicks to pass through the magnifier).
+Settings are stored in your user profile, so the area, zoom and position are restored the next time you open the app.
+Everything ships as **one standalone `area_selector.exe`** — no installer, no extra files, no runtime DLLs.
 
 ![Description gif image](./assets/area-selector-gif.gif)
 
@@ -18,10 +18,64 @@ Its modular multi-binary architecture ensures smooth operation, whether selectin
 
 ---
 
-## 🦀 Requirements to Run the Project
+## 🚀 Quick Start (No Rust Required)
 
-- **Backend / Core Application:** Rust (2021 Edition)  
+1. Download **`area_selector.exe`** from the [GitHub Releases](https://github.com/jfan-dev/area-selector-accessibility-app/releases) page.
+2. Put it in any folder and double-click it.
+
+That's it — the single executable contains the control panel, the area selector and the magnifier.
+
+**Requirements:** Windows 10 or 11, 64-bit. Windows 10 version 2004 or newer is recommended: older versions work, but the magnifier can show itself when it overlaps the selected area.
+
+---
+
+## 🎮 How to Use
+
+| Control | What it does |
+|---------|--------------|
+| **Selecionar Área** | Opens a fullscreen overlay over a dimmed screenshot of your screen. Click and drag to select the region to magnify (the selection is shown at full brightness). **ESC** cancels. |
+| **Iniciar Lupa** | Opens the magnifier window on the saved area (green border = interactive). Press **ESC** on it to close it. |
+| **Alternar Lupa Passthrough** | Turns click-through on/off: the border turns grey and mouse clicks go to the game underneath. Opens the magnifier in passthrough mode if it isn't open. |
+| **Fechar Lupa** | Closes the magnifier — the only way to close it while it is in passthrough mode. |
+| **Zoom / Posição X / Posição Y / FPS** | Magnification (0.5×–5×), window position and refresh rate (5–60 FPS). Changes apply to the open magnifier immediately. |
+| **💾 Salvar Configurações** | Saves zoom, position and FPS. The selected area is saved automatically. |
+| **❌ Sair** (or closing the window) | Closes the app and the magnifier. |
+
+The magnifier keeps running while the control panel is minimized.
+
+Settings are stored in `%APPDATA%\area_selector\config.json`.
+
+---
+
+## ⌨️ Command-Line Modes
+
+The same executable can open the selector or the magnifier on their own:
+
+```bash
+# Control panel (default)
+area_selector.exe
+
+# Only the fullscreen area selector — saves the area and exits
+area_selector.exe seletor
+
+# Only the magnifier
+area_selector.exe lupa <x> <y> <width> <height> [zoom|passthrough] [pos_x pos_y]
+```
+
+- `x y width height` — region to magnify, in screen pixels.
+- `zoom` — magnification (e.g. `2`); omitted = zoom from the saved settings. `passthrough` starts in click-through mode.
+- `pos_x pos_y` — magnifier window position; also saved to the settings.
+
+Invalid arguments print a usage message and exit with code 2.
+Set `RUST_LOG=debug` to see detailed logs when starting from a terminal.
+
+---
+
+## 🦀 Requirements to Build the Project
+
+- **Backend / Core Application:** Rust (2021 Edition, stable toolchain)
 - **Frontend / UI:** egui + eframe
+- **Target:** Windows (uses the Win32 API). It can be developed and cross-compiled from Linux/WSL — see below.
 
 ---
 
@@ -29,39 +83,24 @@ Its modular multi-binary architecture ensures smooth operation, whether selectin
 
 ```bash
 git clone https://github.com/jfan-dev/area-selector-accessibility-app.git
-```
-
----
-
-### ▶️ Running the Main App
-
-```bash
-# Access the project folder
 cd area-selector-accessibility-app/
+```
 
-# Build in debug mode
-cargo build
+---
 
-# Run the main window (panel with buttons)
+### ▶️ Building and Running on Windows
+
+```bash
+# Run the control panel (debug build — keeps a console window for logs)
 cargo run
-```
 
----
-
-### ▶️ Running the Area Selector
-
-```bash
-# Fullscreen tool to select the screen area
+# Command-line modes
 cargo run -- seletor
-```
+cargo run -- lupa 100 100 300 200 2
 
----
-
-### ▶️ Running the Magnifier (Lupa)
-
-```bash
-# Start the magnifier window with area/zoom/position
-cargo run -- lupa <x> <y> <width> <height> [zoom|passthrough] [pos_x pos_y]
+# Optimized standalone executable (no console window)
+cargo build --release
+# → target/release/area_selector.exe
 ```
 
 ---
@@ -69,7 +108,7 @@ cargo run -- lupa <x> <y> <width> <height> [zoom|passthrough] [pos_x pos_y]
 ### 🐧 Building From Linux / WSL (Ubuntu)
 
 The app uses the Windows API, so it only runs on Windows — but you can develop and cross-compile it from Linux or WSL2.
-On WSL, the resulting `.exe` files can be launched straight from the Linux shell and open on the Windows desktop.
+On WSL, the resulting `.exe` can be launched straight from the Linux shell and opens on the Windows desktop.
 
 ```bash
 # 1. Install the MinGW-w64 cross-compiler
@@ -92,37 +131,24 @@ cargo wclippy
 cargo fmt --check
 ```
 
-If running from inside the WSL filesystem is slow, copy the release folder to the Windows side
-(e.g. `/mnt/c/Users/<you>/area-selector/`) and run `area_selector.exe` from there.
+If running from inside the WSL filesystem is slow, copy `area_selector.exe` to the Windows side
+(e.g. `/mnt/c/Users/<you>/area-selector/`) and run it from there.
 
 ---
 
-### ▶️ Running From Release Build (No Rust Required)
+### 🗂 Project Structure
 
-If you prefer not to compile the project, you can run it directly using the pre-built binaries:
-
-1. Download the release ZIP from the [GitHub Releases](https://github.com/jfan-dev/area-selector-accessibility-app/releases) page and extract it.
-2. Inside the extracted folder, run the main executable:
-
-   **`area_selector.exe`**  
-   Launches the main control panel for selecting areas and starting the magnifier.
-
-
-### 📌 Auxiliary Binaries
-
-These executables are also available in the same folder:
-
-- **`seletor.exe`**  
-  Opens the fullscreen area selector for choosing the capture region.
-
-- **`lupa.exe`**  
-  Starts the magnifier window (requires arguments such as position, size, zoom, or passthrough).
-
-
-### ⚠️ Important
-
-Make sure all `.exe` files remain in the **same directory**,  
-as they depend on shared resources and configuration files.
+| Path | Purpose |
+|------|---------|
+| `src/main.rs` | Entry point: command-line modes, DPI awareness, logging |
+| `src/app.rs` | Control panel; owns the selector and magnifier windows |
+| `src/ui_selector.rs` | Fullscreen area selector |
+| `src/lupa.rs` | Magnifier window |
+| `src/capture.rs` | Screen capture (Win32 GDI) |
+| `src/config.rs` | Settings load/save |
+| `src/cli.rs` | Command-line argument parsing |
+| `src/icon.rs` / `build.rs` | App icon and version info embedded in the exe |
+| `IMPROVEMENT_PLAN.md` | Roadmap of the quality improvements |
 
 ---
 
@@ -136,8 +162,8 @@ as they depend on shared resources and configuration files.
 
 | Feature | Preview | Description |
 |--------|---------|-------------|
-| Area Selection Tool | ![Area Selection Tool image](./assets/area-selector-tool.jpg) | Fullscreen drag-to-select with live preview |
-| Magnifier Window | ![Magnifier Window image](./assets/magnifier-window.jpg) | Zoomed region with adjustable zoom factor |
+| Area Selection Tool | ![Area Selection Tool image](./assets/area-selector-tool.jpg) | Fullscreen drag-to-select with live selection preview |
+| Magnifier Window | ![Magnifier Window image](./assets/magnifier-window.jpg) | Zoomed region with adjustable zoom, position and FPS, updated live |
 | Passthrough Mode | ![Passthrough Mode image](./assets/passthrough-window.jpg) | Lets clicks pass through the magnifier window |
 
 ---
@@ -146,10 +172,12 @@ as they depend on shared resources and configuration files.
 
 | Technology | Purpose | Website |
 |-----------|----------|---------|
-| Rust | Core application and binaries | https://www.rust-lang.org/ |
-| eframe / egui | Graphical UI framework | https://github.com/emilk/egui |
-| Windows API | Screen capture & window mode control | https://learn.microsoft.com/windows |
+| Rust | Core application | https://www.rust-lang.org/ |
+| eframe / egui | Graphical UI framework and multi-window (viewport) support | https://github.com/emilk/egui |
+| Windows API (`windows` crate) | GDI screen capture, capture exclusion, DPI awareness | https://learn.microsoft.com/windows |
 | serde / serde_json | Persistent storage for config | https://serde.rs/ |
+| log / env_logger | Logging | https://docs.rs/env_logger |
+| embed-resource | Icon and version info in the exe | https://docs.rs/embed-resource |
 
 ---
 
@@ -157,25 +185,43 @@ as they depend on shared resources and configuration files.
 
 ### 🟥 Problem — Persisting User Configuration  
 Keeping area, zoom and position across sessions required a clean persistent solution integrated into user directories.  
-**Solution:** implemented `AppConfig` using `serde_json` and stored it under the OS config path.
+**Solution:** implemented `AppConfig` using `serde_json` and stored it under the OS config path. New settings (like FPS) have defaults, so older config files keep working.
 
 ### 🟩 Problem — Click-Through Mode  
-Switching between interactive and passthrough modes required dynamic editing of extended window styles.  
-**Solution:** read and reapplied HWND using `WS_EX_TRANSPARENT` plus layered attributes.
+Switching between interactive and passthrough modes originally required editing the window's extended styles (`WS_EX_TRANSPARENT`) through a window handle saved to a file, then restarting the magnifier.  
+**Solution:** the magnifier is now an egui viewport, and click-through is a viewport property (`with_mouse_passthrough`) that is toggled in place — no restart, no handle file.
 
 ### 🟦 Problem — High CPU Usage & Memory Leak During Selection
 
 Originally, the selection overlay (the blue rectangle drawn during area selection) was rendered every frame at ~60 FPS while also capturing screen data using the scrap crate.
 This caused unnecessary GPU/CPU usage and a visible memory leak, especially on 4K monitors, because the capture pipeline and rendering loop were being executed far more often than necessary.
 
-**Solution:** replaced the frame-based capture from scrap with the Windows Accessibility API, which provides a more efficient, event-driven way to retrieve screen content. This eliminated the leak, reduced resource usage, and made the selection preview significantly smoother and more stable overall.
+**Solution:** replaced scrap with direct Win32 GDI capture (`BitBlt`). The capturer now reuses its buffers between frames and releases all GDI handles automatically, and the selector only redraws when the mouse or keyboard is used.
+
+### 🟨 Problem — Three Executables in One Folder
+
+The panel, selector and magnifier used to be three programs (`area_selector.exe`, `seletor.exe`, `lupa.exe`) that talked through command-line arguments and files, had to stay in the same folder, and couldn't react to setting changes.  
+**Solution:** merged into a single executable using egui multi-viewports. The magnifier is a *deferred* viewport with its own repaint loop, so it keeps updating even while the panel is minimized, and slider changes reach it immediately.
+
+### 🟪 Problem — The Magnifier Magnifying Itself
+
+When the magnifier window overlapped the selected area, it captured its own image.  
+**Solution:** the magnifier window is excluded from screen capture with `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`.
+
+### 🟧 Problem — Display Scaling (125%, 150%…)
+
+Mouse positions are in logical points while screen capture uses physical pixels, so on scaled displays the wrong region was magnified.  
+**Solution:** the process is per-monitor DPI aware, areas are stored in physical pixels, and zoom means true magnification at any scaling.
 
 ---
 
 ## 🐛 Known Bugs / Limitations
 
-### - Magnifier window does not automatically update its size or position.
-  After adjusting zoom or coordinates in the main app, the magnifier must be restarted manually or the stated toogled between passthrough because the window is not yet reactive to changes in configuration. The window size (inner_size) and position (viewport.position) are only applied when the binary (lupa.exe) launches.
+- **Primary monitor only.** The area selector covers the primary monitor.
+- **Selector background is a still screenshot** taken when you click *Selecionar Área* (secondary windows can't be transparent with eframe 0.26 on Windows), so animations behind it are frozen while you select.
+- **The magnifier doesn't appear in screen recordings or streams** (OBS, Discord), a side effect of excluding it from capture.
+- **Slider changes are saved only with *Salvar Configurações*** (or when the magnifier is started); the selected area is saved automatically.
+- **Areas saved by older versions on scaled displays** may point to the wrong region — select the area again once.
 
 ---
 
