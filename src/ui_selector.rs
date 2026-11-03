@@ -6,7 +6,7 @@ use eframe::egui::{self, *};
 pub enum SelectorOutcome {
     /// Still waiting for the user to finish a drag.
     Pending,
-    /// The user released the mouse after dragging.
+    /// The user released the mouse after dragging. Area is in physical pixels.
     Selected(Area),
     /// The user pressed ESC or closed the window.
     Cancelled,
@@ -33,12 +33,10 @@ impl AreaSelector {
     /// Must be called before the overlay window is shown, so it doesn't capture itself.
     pub fn capture_screen() -> Self {
         let size = primary_screen_size_px();
-        let screenshot = capture::capture_area(0, 0, size.x as u32, size.y as u32).map(|img| {
-            ColorImage::from_rgba_unmultiplied(
-                [img.width() as usize, img.height() as usize],
-                img.as_raw(),
-            )
-        });
+        let screenshot = capture::capture_area(0, 0, size.x as u32, size.y as u32);
+        if screenshot.is_none() {
+            log::warn!("selector screenshot failed; using a plain overlay");
+        }
         Self {
             screenshot,
             ..Self::default()
@@ -110,10 +108,12 @@ impl AreaSelector {
                 } else if self.selecting {
                     self.selecting = false;
                     if let (Some(start), Some(end)) = (self.start, self.end) {
-                        outcome = SelectorOutcome::Selected(Area {
+                        let area = Area {
                             start: start.into(),
                             end: end.into(),
-                        });
+                        };
+                        let ppp = ctx.pixels_per_point();
+                        outcome = SelectorOutcome::Selected(area.to_physical(ppp));
                     }
                 }
 
@@ -146,7 +146,8 @@ impl AreaSelector {
             outcome = SelectorOutcome::Cancelled;
         }
 
-        ctx.request_repaint_after(std::time::Duration::from_millis(30));
+        // No timed repaint: egui repaints on every mouse/keyboard event, which is all
+        // the selector needs (it used to redraw every 30 ms).
         outcome
     }
 }

@@ -26,6 +26,19 @@ pub struct Area {
 }
 
 impl Area {
+    /// Converts an area measured in egui points to physical pixels, the unit that
+    /// screen capture uses. Needed on displays with Windows scaling above 100%.
+    pub fn to_physical(&self, pixels_per_point: f32) -> Self {
+        let scale = |p: SerializablePos| SerializablePos {
+            x: p.x * pixels_per_point,
+            y: p.y * pixels_per_point,
+        };
+        Self {
+            start: scale(self.start),
+            end: scale(self.end),
+        }
+    }
+
     /// Normalized `(x, y, width, height)` in whole pixels, regardless of drag direction.
     pub fn to_rect_px(&self) -> (u32, u32, u32, u32) {
         let x = self.start.x.min(self.end.x).round() as u32;
@@ -75,6 +88,19 @@ mod tests {
     #[test]
     fn zero_size_area() {
         assert_eq!(area(5.0, 5.0, 5.0, 5.0).to_rect_px(), (5, 5, 0, 0));
+    }
+
+    #[test]
+    fn to_physical_scales_both_corners() {
+        let a = area(10.0, 20.0, 110.0, 70.0).to_physical(1.5);
+        assert_eq!(a, area(15.0, 30.0, 165.0, 105.0));
+        assert_eq!(a.to_rect_px(), (15, 30, 150, 75));
+    }
+
+    #[test]
+    fn to_physical_at_100_percent_is_identity() {
+        let a = area(10.0, 20.0, 110.0, 70.0);
+        assert_eq!(a.to_physical(1.0), a);
     }
 
     #[test]

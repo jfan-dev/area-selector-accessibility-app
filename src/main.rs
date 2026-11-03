@@ -12,6 +12,7 @@ use eframe::egui::{self, ViewportBuilder, ViewportCommand};
 
 fn main() {
     attach_parent_console();
+    init_logging();
     enable_dpi_awareness();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = match cli::parse(&args) {
@@ -41,8 +42,9 @@ fn run_panel() -> eframe::Result<()> {
     }
     let options = eframe::NativeOptions {
         viewport: viewport
-            .with_inner_size([400.0, 200.0])
-            .with_resizable(false)
+            .with_inner_size([460.0, 420.0])
+            .with_min_inner_size([420.0, 380.0])
+            .with_resizable(true)
             .with_decorations(true)
             .with_transparent(false),
         ..Default::default()
@@ -63,8 +65,10 @@ fn run_selector() -> eframe::Result<()> {
             match self.0.ui(ctx) {
                 SelectorOutcome::Pending => {}
                 SelectorOutcome::Selected(area) => {
-                    config::save_area(&area);
-                    println!("✅ Área salva: {:?}", area);
+                    match config::save_area(&area) {
+                        Ok(()) => println!("✅ Área salva: {:?}", area.to_rect_px()),
+                        Err(err) => eprintln!("Erro ao salvar a área: {err}"),
+                    }
                     ctx.send_viewport_cmd(ViewportCommand::Close);
                 }
                 SelectorOutcome::Cancelled => ctx.send_viewport_cmd(ViewportCommand::Close),
@@ -101,16 +105,20 @@ fn run_lupa(args: LupaArgs) -> eframe::Result<()> {
     if let Some([x, y]) = args.position {
         cfg.lupa_pos_x = x;
         cfg.lupa_pos_y = y;
-        config::save_config(&cfg);
-        println!("💾 Nova posição salva: ({x}, {y})");
+        match config::save_config(&cfg) {
+            Ok(()) => println!("💾 Nova posição salva: ({x}, {y})"),
+            Err(err) => eprintln!("Erro ao salvar a posição: {err}"),
+        }
     }
 
-    let lupa = LupaApp::new(
+    let mut lupa = LupaApp::new(
         (args.x, args.y, args.w, args.h),
         args.zoom.unwrap_or(cfg.lupa_zoom),
         [cfg.lupa_pos_x, cfg.lupa_pos_y],
         args.passthrough,
+        system_pixels_per_point(),
     );
+    lupa.frame_interval = cfg.lupa_frame_interval();
     let options = eframe::NativeOptions {
         viewport: lupa.viewport_builder(),
         ..Default::default()
@@ -131,6 +139,23 @@ fn enable_dpi_awareness() {
     };
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+}
+
+/// Logs go to stderr (visible when started from a terminal). Default level is `warn`;
+/// override with e.g. `RUST_LOG=debug`.
+fn init_logging() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+}
+
+/// Display scale of the primary monitor, for sizing the standalone magnifier window
+/// before it exists (e.g. 1.5 at 150% scaling).
+fn system_pixels_per_point() -> f32 {
+    let dpi = unsafe { windows::Win32::UI::HiDpi::GetDpiForSystem() };
+    if dpi == 0 {
+        1.0
+    } else {
+        dpi as f32 / 96.0
     }
 }
 
