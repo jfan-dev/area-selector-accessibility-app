@@ -5,8 +5,9 @@
 This application is designed to assist video game players with limited field of view or visual accessibility needs.
 It enables precise selection of any region on the screen and magnifies it through an adjustable, accessibility-friendly zoom window (“Lupa”).
 
-The tool allows users to reposition and resize the magnified area, control zoom intensity and refresh rate, and toggle passthrough mode (allowing clicks to pass through the magnifier).
-All settings are saved automatically to your user profile, so the area, zoom, position, FPS and passthrough mode are restored the next time you open the app.
+The tool lets players drag and zoom the magnifier directly, toggle passthrough mode (clicks go through the magnifier to the game), and control everything with **global hotkeys without leaving the game**.
+The panel itself is built for low vision: large text (up to 200 %), a high-contrast theme, full keyboard navigation and screen-reader support, in **Portuguese or English**.
+All settings are saved automatically, and the app can keep running in the **system tray**.
 Everything ships as **one standalone `area_selector.exe`** — no installer, no extra files, no runtime DLLs.
 
 ![Description gif image](./assets/area-selector-gif.gif)
@@ -24,6 +25,7 @@ Everything ships as **one standalone `area_selector.exe`** — no installer, no 
 2. Put it in any folder and double-click it.
 
 That's it — the single executable contains the control panel, the area selector and the magnifier.
+A short guide opens the first time; reopen it any time with the **?** button next to the title.
 
 **Requirements:** Windows 10 or 11, 64-bit. Windows 10 version 2004 or newer is recommended: older versions work, but the magnifier can show itself when it overlaps the selected area.
 
@@ -31,18 +33,40 @@ That's it — the single executable contains the control panel, the area selecto
 
 ## 🎮 How to Use
 
-| Control | What it does |
-|---------|--------------|
-| **Selecionar Área** | Opens a fullscreen overlay over a dimmed screenshot of your screen. Click and drag to select the region to magnify (the selection is shown at full brightness). **ESC** cancels. |
-| **Iniciar Lupa** | Opens the magnifier window on the saved area, in the saved passthrough mode (green border = interactive, grey = passthrough). Press **ESC** on an interactive magnifier to close it. |
-| **Passthrough: ligado / desligado** | Turns click-through on/off: the border turns grey and mouse clicks go to the game underneath. The button shows the current mode, which is saved and used the next time the magnifier opens. It only switches the mode — it doesn't open the magnifier. |
-| **Fechar Lupa** | Closes the magnifier — the only way to close it while it is in passthrough mode. |
-| **Zoom / Posição X / Posição Y / FPS** | Magnification (0.5×–5×), window position and refresh rate (5–60 FPS). Changes apply to the open magnifier immediately and are saved automatically. |
-| **❌ Sair** (or closing the window) | Closes the app and the magnifier. |
+### The panel
+| Part | What it does |
+|------|--------------|
+| **Status chips** (Area · Magnifier · Passthrough) | Show the current state and are also shortcuts: click *Area* to select a new one, *Magnifier* to open/close it, *Passthrough* to toggle it. |
+| **Home** tab | *Select area*, open/close the magnifier, the **passthrough switch**, zoom (− / slider / +), refresh rate (FPS) and a **3×3 positioning pad** (corners and centre). Exact X/Y values are under *Advanced*. |
+| **Hotkeys** tab | Change, remove or restore the global hotkeys (see below). Warns when a combination is used by another program or twice. |
+| **Appearance** tab | Theme (same as Windows / light / dark), **high contrast**, **text size 100–200 %**, language, close-to-tray, and the magnifier border (colour presets incl. a colour-blind-friendly one, thickness, mode badge). |
+| **Quit** | Closes the app and the magnifier. |
 
-The magnifier keeps running while the control panel is minimized.
+Every control has a tooltip and can be reached with **Tab** (Space/Enter activates it); screen readers such as Windows Narrator announce the groups and controls.
 
-Settings are saved automatically (half a second after you stop moving a slider, and when the app closes) to `%APPDATA%\area_selector\config.json`.
+### Selecting an area
+*Select area* shows a dimmed screenshot of your screen with a crosshair: click and drag over the region to magnify — the size is shown next to the cursor. **ESC** or **right-click** cancels; selections smaller than 16 px are rejected.
+
+### The magnifier
+- **Drag it** to move it; **mouse wheel** or **+ / −** to zoom; **arrow keys** move it (Shift = 10 px); **P** turns passthrough on; **ESC** closes it.
+- Green border + *Interactive* badge = you can drag/zoom it; grey border + *Passthrough* badge = clicks go through to the game.
+- It keeps running while the panel is minimized or in the tray. Selecting a new area updates it right away.
+
+### Global hotkeys (work inside games)
+| Default | Action |
+|---------|--------|
+| **Ctrl+Alt+P** | Passthrough on/off |
+| **Ctrl+Alt+L** | Open/close the magnifier |
+| **Ctrl+Alt+A** | Select area |
+| **Ctrl+Alt+PageUp / PageDown** | Zoom in / out |
+| **Ctrl+Alt+H** | Show the panel |
+
+### System tray
+Closing the panel keeps the app running in the system tray (the first time, a short message explains it — turn it off under *Appearance → Window*). Click the tray icon to open the panel; right-click for a menu with the magnifier, passthrough, area selection and Quit.
+
+> **Tip:** play in windowed or borderless fullscreen mode — in exclusive fullscreen, Windows hides overlay windows like the magnifier.
+
+Settings are saved automatically to `%APPDATA%\area_selector\config.json`.
 
 ---
 
@@ -140,14 +164,20 @@ If running from inside the WSL filesystem is slow, copy `area_selector.exe` to t
 | Path | Purpose |
 |------|---------|
 | `src/main.rs` | Entry point: command-line modes, DPI awareness, logging |
-| `src/app.rs` | Control panel; owns the selector and magnifier windows |
+| `src/app.rs` | App state; owns the selector and magnifier windows, hotkeys and tray |
+| `src/app/panel.rs` | Control panel UI (tabs, cards, dialogs) |
+| `src/theme.rs` | Accessible theme (large text, high contrast, focus outline) |
+| `src/i18n.rs` | Portuguese / English texts |
+| `src/widgets.rs` | Accessible widgets and responsive layout helpers |
+| `src/hotkeys.rs` | Global hotkeys |
+| `src/tray.rs` | System tray icon and menu |
 | `src/ui_selector.rs` | Fullscreen area selector |
 | `src/lupa.rs` | Magnifier window |
 | `src/capture.rs` | Screen capture (Win32 GDI) |
 | `src/config.rs` | Settings load/save |
 | `src/cli.rs` | Command-line argument parsing |
 | `src/icon.rs` / `build.rs` | App icon and version info embedded in the exe |
-| `IMPROVEMENT_PLAN.md` | Roadmap of the quality improvements |
+| `IMPROVEMENT_PLAN.md` / `UX_PLAN.md` | Roadmaps of the quality and UI/UX improvements |
 
 ---
 
@@ -175,6 +205,8 @@ If running from inside the WSL filesystem is slow, copy `area_selector.exe` to t
 | eframe / egui | Graphical UI framework and multi-window (viewport) support | https://github.com/emilk/egui |
 | Windows API (`windows` crate) | GDI screen capture, capture exclusion, DPI awareness | https://learn.microsoft.com/windows |
 | serde / serde_json | Persistent storage for config | https://serde.rs/ |
+| global-hotkey | System-wide hotkeys | https://docs.rs/global-hotkey |
+| tray-icon | System tray icon and menu | https://docs.rs/tray-icon |
 | log / env_logger | Logging | https://docs.rs/env_logger |
 | embed-resource | Icon and version info in the exe | https://docs.rs/embed-resource |
 
@@ -212,13 +244,19 @@ When the magnifier window overlapped the selected area, it captured its own imag
 Mouse positions are in logical points while screen capture uses physical pixels, so on scaled displays the wrong region was magnified.  
 **Solution:** the process is per-monitor DPI aware, areas are stored in physical pixels, and zoom means true magnification at any scaling.
 
+### ♿ Problem — A Panel Usable With Low Vision
+
+The original panel had small default text, colour-only state and no keyboard or screen-reader support — for an app whose users have low vision.
+**Solution:** an accessible theme whose contrast ratios are unit-tested against WCAG, text size up to 200 % with a responsive layout (checked by a headless layout test at many window widths), named accessibility groups for screen readers, and global hotkeys so a passthrough magnifier can be controlled without leaving the game.
+
 ---
 
 ## 🐛 Known Bugs / Limitations
 
 - **Primary monitor only.** The area selector covers the primary monitor.
-- **Selector background is a still screenshot** taken when you click *Selecionar Área* (secondary windows weren't see-through with eframe's glow renderer on Windows), so animations behind it are frozen while you select.
+- **Selector background is a still screenshot** taken when you click *Select area* (secondary windows weren't see-through with eframe's glow renderer on Windows), so animations behind it are frozen while you select.
 - **The magnifier doesn't appear in screen recordings or streams** (OBS, Discord), a side effect of excluding it from capture.
+- **Exclusive fullscreen games hide the magnifier** (a Windows limitation for overlay windows) — use windowed or borderless fullscreen.
 - **Areas saved by older versions on scaled displays** may point to the wrong region — select the area again once.
 
 ---

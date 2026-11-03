@@ -11,13 +11,19 @@ const ICON_SIZE: u32 = 256;
 /// Decoded once, shared by every window.
 pub fn app_icon() -> Option<Arc<IconData>> {
     static ICON: OnceLock<Option<Arc<IconData>>> = OnceLock::new();
-    ICON.get_or_init(|| decode(ICON_PNG).map(Arc::new)).clone()
+    ICON.get_or_init(|| decode(ICON_PNG, ICON_SIZE).map(Arc::new))
+        .clone()
 }
 
-fn decode(png: &[u8]) -> Option<IconData> {
+/// The icon as RGBA pixels at `size`×`size` (e.g. 32 for the system tray).
+pub fn app_icon_rgba(size: u32) -> Option<IconData> {
+    decode(ICON_PNG, size)
+}
+
+fn decode(png: &[u8], size: u32) -> Option<IconData> {
     let image = image::load_from_memory_with_format(png, image::ImageFormat::Png).ok()?;
     let image = image
-        .resize_exact(ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3)
+        .resize_exact(size, size, image::imageops::FilterType::Lanczos3)
         .into_rgba8();
     Some(IconData {
         width: image.width(),

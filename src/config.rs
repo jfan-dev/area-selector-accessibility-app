@@ -110,6 +110,19 @@ pub struct AppConfig {
     /// System-wide shortcuts. Missing actions get their defaults on load.
     #[serde(default = "hotkeys::default_bindings")]
     pub hotkeys: Bindings,
+    /// Closing the panel hides it to the system tray instead of quitting.
+    #[serde(default = "default_true")]
+    pub close_to_tray: bool,
+    /// The one-time explanation of close-to-tray was confirmed with "don't show again".
+    #[serde(default)]
+    pub tray_notice_shown: bool,
+    /// The first-run guide was finished or skipped.
+    #[serde(default)]
+    pub onboarding_done: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_lupa_fps() -> u32 {
@@ -128,6 +141,9 @@ impl Default for AppConfig {
             language: None,
             appearance: Appearance::default(),
             hotkeys: hotkeys::default_bindings(),
+            close_to_tray: true,
+            tray_notice_shown: false,
+            onboarding_done: false,
         }
     }
 }
@@ -300,6 +316,9 @@ mod tests {
                 bindings.insert(hotkeys::Action::ZoomIn, String::new());
                 bindings
             },
+            close_to_tray: false,
+            tray_notice_shown: true,
+            onboarding_done: true,
         };
         save_config_to(&path, &cfg).unwrap();
         assert_eq!(load_config_from(&path), cfg);
@@ -344,6 +363,11 @@ mod tests {
         );
         assert_eq!(cfg.appearance, Appearance::default());
         assert_eq!(cfg.hotkeys, hotkeys::default_bindings());
+        assert!(cfg.close_to_tray, "close to tray is on by default");
+        assert!(
+            !cfg.onboarding_done,
+            "existing users see the new guide once"
+        );
     }
 
     #[test]

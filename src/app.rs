@@ -6,6 +6,7 @@ use area_selector::i18n::{self, Lang, Strings};
 use area_selector::lupa::{self, LupaApp, LupaOutcome};
 use area_selector::model::Area;
 use area_selector::theme;
+use area_selector::tray::{Tray, TrayCommand, TrayLabels, TrayState};
 use area_selector::ui_selector::{self, AreaSelector, SelectorOutcome};
 use eframe::egui::{self, *};
 use std::io;
@@ -83,6 +84,16 @@ pub struct App {
     registered_bindings: Option<Bindings>,
     /// Action whose new combination is being recorded in the Hotkeys tab.
     recording: Option<Action>,
+    /// System tray icon (`None` in tests, or if Windows refused to create it).
+    tray: Option<Tray>,
+    /// Set by "Quit": the next close request really closes the app.
+    quitting: bool,
+    /// One-time explanation shown on the first close-to-tray.
+    show_tray_notice: bool,
+    tray_notice_dont_show: bool,
+    /// First-run guide (also reopened with the "?" button) and its current step.
+    show_onboarding: bool,
+    onboarding_step: usize,
     /// How far the panel content sticks out past the window edge (layout tests).
     #[cfg(test)]
     layout_overflow: f32,
@@ -91,7 +102,14 @@ pub struct App {
 impl App {
     pub fn new(ctx: &egui::Context) -> Self {
         let hotkeys = HotkeyService::new(ctx);
-        Self::with_config(ctx, config::load_config(), Lang::system(), Some(hotkeys))
+        let tray = Tray::new(ctx);
+        Self::with_config(
+            ctx,
+            config::load_config(),
+            Lang::system(),
+            Some(hotkeys),
+            tray,
+        )
     }
 
     fn with_config(
@@ -99,7 +117,9 @@ impl App {
         config: AppConfig,
         system_lang: Lang,
         hotkeys: Option<HotkeyService>,
+        tray: Option<Tray>,
     ) -> Self {
+        let show_onboarding = !config.onboarding_done;
         let mut app = Self {
             saved_area: config.area,
             autosave: AutoSave::new(&config),
@@ -114,6 +134,12 @@ impl App {
             hotkeys,
             registered_bindings: None,
             recording: None,
+            show_onboarding,
+            tray,
+            quitting: false,
+            show_tray_notice: false,
+            tray_notice_dont_show: false,
+            onboarding_step: 0,
             #[cfg(test)]
             layout_overflow: 0.0,
         };
@@ -137,6 +163,68 @@ impl App {
         if self.registered_bindings.as_ref() != Some(&self.config.hotkeys) {
             service.apply(&self.config.hotkeys);
             self.registered_bindings = Some(self.config.hotkeys.clone());
+        }
+    }
+
+    /// Closes the app for real (also from the tray, while the panel is hidden).
+    fn quit(&mut self, ctx: &egui::Context) {
+        self.quitting = true;
+        ctx.send_viewport_cmd(ViewportCommand::Close);
+    }
+
+    fn hide_to_tray(&mut self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+    }
+
+    /// Closing the panel hides it to the tray (when enabled and a tray icon exists);
+    /// the first time, a short explanation is shown instead.
+    fn handle_close_request(&mut self, ctx: &egui::Context) {
+        let close = ctx.input(|i| i.viewport().close_requested());
+        if !close || self.quitting || self.tray.is_none() || !self.config.close_to_tray {
+            return;
+        }
+        ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+        if self.config.tray_notice_shown {
+            self.hide_to_tray(ctx);
+        } else {
+            self.show_tray_notice = true;
+            ctx.send_viewport_cmd(ViewportCommand::RequestPaintWhileHidden);
+        }
+    }
+
+    fn handle_tray(&mut self, ctx: &egui::Context) {
+        let commands = self.tray.as_mut().map(Tray::poll).unwrap_or_default();
+        for command in commands {
+            match command {
+                TrayCommand::ShowPanel => self.run_action(ctx, Action::ShowPanel),
+                TrayCommand::ToggleLupa => self.run_action(ctx, Action::ToggleLupa),
+                TrayCommand::TogglePassthrough => self.run_action(ctx, Action::TogglePassthrough),
+                TrayCommand::SelectArea => self.run_action(ctx, Action::SelectArea),
+                TrayCommand::Quit => self.quit(ctx),
+            }
+        }
+
+        let s = self.strings();
+        let item = |text: &str, action: Action| match self.hotkey_label(action) {
+            Some(hotkey) => format!("{text}\t{hotkey}"),
+            None => text.to_owned(),
+        };
+        let labels = TrayLabels {
+            tooltip: s.app_title.to_owned(),
+            show_panel: item(s.tray_show, Action::ShowPanel),
+            open_lupa: item(s.tray_open_lupa, Action::ToggleLupa),
+            close_lupa: item(s.tray_close_lupa, Action::ToggleLupa),
+            passthrough: item(s.tray_passthrough, Action::TogglePassthrough),
+            select_area: item(s.tray_select_area, Action::SelectArea),
+            quit: s.tray_quit.to_owned(),
+        };
+        let state = TrayState {
+            has_area: self.saved_area.is_some(),
+            lupa_open: self.lupa.is_some(),
+            passthrough: self.config.lupa_passthrough,
+        };
+        if let Some(tray) = &mut self.tray {
+            tray.update(&labels, state);
         }
     }
 
@@ -378,6 +466,8 @@ impl eframe::App for App {
         for action in actions {
             self.run_action(ctx, action);
         }
+        self.handle_tray(ctx);
+        self.handle_close_request(ctx);
         self.reap_selector();
         self.reap_closed_lupa();
         self.sync_hotkeys();
@@ -419,7 +509,8 @@ mod tests {
             start: SerializablePos { x: 10.0, y: 20.0 },
             end: SerializablePos { x: 304.0, y: 234.0 },
         });
-        let mut app = App::with_config(&ctx, config, lang, None);
+        config.onboarding_done = true; // the guide is a separate window, tested below
+        let mut app = App::with_config(&ctx, config, lang, None, None);
         app.tab = tab;
         let input = || RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 720.0))),
@@ -443,6 +534,52 @@ mod tests {
                         assert!(
                             over <= 1.0,
                             "{lang:?} {tab:?} at {width} px, {:.0}%: content is {over:.0} px too wide",
+                            scale * 100.0
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The first-run guide (every step) and the tray notice stay inside the window.
+    #[test]
+    fn dialogs_fit_narrow_and_wide_windows() {
+        for lang in Lang::ALL {
+            for width in [320.0, 900.0] {
+                for scale in [1.0, 2.0] {
+                    for dialog in [
+                        "onboarding_0",
+                        "onboarding_1",
+                        "onboarding_2",
+                        "tray_notice",
+                    ] {
+                        let ctx = egui::Context::default();
+                        let mut config = AppConfig::default();
+                        config.appearance.ui_scale = scale;
+                        let mut app = App::with_config(&ctx, config, lang, None, None);
+                        let id = if dialog == "tray_notice" {
+                            app.show_onboarding = false;
+                            app.show_tray_notice = true;
+                            Id::unique("tray_notice")
+                        } else {
+                            app.onboarding_step = dialog[11..].parse().unwrap();
+                            Id::unique("onboarding")
+                        };
+                        let input = || RawInput {
+                            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 720.0))),
+                            ..Default::default()
+                        };
+                        for _ in 0..4 {
+                            let mut output = ctx.run_ui(input(), |ui| app.panel_ui(ui));
+                            output.textures_delta.clear();
+                        }
+                        let rect = ctx
+                            .memory(|m| m.area_rect(id))
+                            .unwrap_or_else(|| panic!("{dialog} not shown"));
+                        assert!(
+                            rect.left() >= -0.5 && rect.right() <= width + 0.5,
+                            "{lang:?} {dialog} at {width} px, {:.0}%: {rect:?} outside the window",
                             scale * 100.0
                         );
                     }

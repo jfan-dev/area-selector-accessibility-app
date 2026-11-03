@@ -39,6 +39,10 @@ impl App {
             ui.add_space(4.0);
         });
 
+        let ctx = ui.ctx().clone();
+        self.tray_notice_ui(&ctx, s);
+        self.onboarding_ui(&ctx, s);
+
         CentralPanel::default().show(ui, |ui| {
             self.header(ui, s);
             let tabs_width = button_width(ui, s.tab_home)
@@ -91,7 +95,18 @@ impl App {
 
     /// Title and status chips. Each chip is also a shortcut for its feature.
     fn header(&mut self, ui: &mut Ui, s: &'static Strings) {
-        ui.heading(s.app_title);
+        // Title with a "?" button that reopens the first-run guide.
+        let button = ui.spacing().interact_size.y + ui.spacing().item_spacing.x;
+        let needed = text_width(ui, s.app_title, TextStyle::Heading) + button;
+        let mut help = false;
+        row_or_column(ui, needed, |ui| {
+            ui.heading(s.app_title);
+            help = icon_button(ui, true, "?", s.help_tip).clicked();
+        });
+        if help {
+            self.show_onboarding = true;
+            self.onboarding_step = 0;
+        }
         let has_area = self.saved_area.is_some();
         let lupa_open = self.lupa.is_some();
         let passthrough = self.config.lupa_passthrough;
@@ -480,6 +495,18 @@ impl App {
         });
 
         ui.add_space(8.0);
+        card(ui, s.card_window, |ui| {
+            toggle_switch(
+                ui,
+                &mut self.config.close_to_tray,
+                s.close_to_tray,
+                s.on,
+                s.off,
+            )
+            .on_hover_text(s.close_to_tray_tip);
+        });
+
+        ui.add_space(8.0);
         card(ui, s.card_lupa_look, |ui| {
             let appearance = &mut self.config.appearance;
             a11y_group(ui, Role::RadioGroup, s.border_colors, |ui| {
@@ -517,10 +544,97 @@ impl App {
         });
     }
 
+    /// Width for dialogs: comfortable on wide windows, never wider than the window.
+    fn dialog_width(ctx: &Context) -> f32 {
+        (ctx.content_rect().width() - 48.0).clamp(200.0, 520.0)
+    }
+
+    /// One-time explanation of close-to-tray, shown on the first close.
+    fn tray_notice_ui(&mut self, ctx: &Context, s: &'static Strings) {
+        if !self.show_tray_notice {
+            return;
+        }
+        let (mut minimize, mut quit) = (false, false);
+        let response = Modal::new(Id::unique("tray_notice")).show(ctx, |ui| {
+            ui.set_max_width(Self::dialog_width(ctx));
+            ui.heading(s.tray_notice_title);
+            ui.label(s.tray_notice_text);
+            ui.checkbox(&mut self.tray_notice_dont_show, s.tray_notice_dont_show);
+            ui.horizontal_wrapped(|ui| {
+                minimize = ui.button(s.tray_notice_minimize).clicked();
+                quit = ui.button(s.tray_notice_quit).clicked();
+            });
+        });
+        if minimize {
+            if self.tray_notice_dont_show {
+                self.config.tray_notice_shown = true;
+            }
+            self.show_tray_notice = false;
+            self.hide_to_tray(ctx);
+        } else if quit {
+            self.show_tray_notice = false;
+            self.quit(ctx);
+        } else if response.should_close() {
+            self.show_tray_notice = false; // Esc / click outside: keep the panel open
+        }
+    }
+
+    /// First-run guide: three short steps plus the fullscreen tip.
+    fn onboarding_ui(&mut self, ctx: &Context, s: &'static Strings) {
+        if !self.show_onboarding {
+            return;
+        }
+        let steps = [
+            (s.onboarding_1_title, s.onboarding_1_text),
+            (s.onboarding_2_title, s.onboarding_2_text),
+            (s.onboarding_3_title, s.onboarding_3_text),
+        ];
+        let step = self.onboarding_step.min(steps.len() - 1);
+        let last = step == steps.len() - 1;
+        let (mut back, mut next, mut done) = (false, false, false);
+        let response = Modal::new(Id::unique("onboarding")).show(ctx, |ui| {
+            ui.set_max_width(Self::dialog_width(ctx));
+            ui.heading(s.onboarding_title);
+            ui.weak((s.onboarding_step)(step + 1, steps.len()));
+            ui.add_space(4.0);
+            let (title, text) = steps[step];
+            caption(ui, title);
+            ui.label(text);
+            if last {
+                ui.add_space(4.0);
+                ui.colored_label(ui.visuals().warn_fg_color, s.onboarding_tip);
+            }
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                if step > 0 {
+                    back = ui.button(s.onboarding_back).clicked();
+                }
+                if last {
+                    done = ui.button(s.onboarding_finish).clicked();
+                } else {
+                    next = ui.button(s.onboarding_next).clicked();
+                }
+                if !last {
+                    done |= ui.button(s.onboarding_skip).clicked();
+                }
+            });
+        });
+        if back {
+            self.onboarding_step = step - 1;
+        } else if next {
+            self.onboarding_step = step + 1;
+        } else if done || response.should_close() {
+            self.show_onboarding = false;
+            self.onboarding_step = 0;
+            self.config.onboarding_done = true;
+        }
+    }
+
     fn footer(&mut self, ui: &mut Ui, s: &'static Strings) {
         ui.horizontal_wrapped(|ui| {
             if ui.button(s.quit).on_hover_text(s.quit_tip).clicked() {
-                ui.ctx().send_viewport_cmd(ViewportCommand::Close);
+                let ctx = ui.ctx().clone();
+                self.quit(&ctx);
             }
             self.status_ui(ui);
         });

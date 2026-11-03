@@ -7,5 +7,6 @@ pub mod icon;
 pub mod lupa;
 pub mod model;
 pub mod theme;
+pub mod tray;
 pub mod ui_selector;
 pub mod widgets;
