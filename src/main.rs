@@ -5,32 +5,36 @@ mod app;
 
 use app::App;
 use area_selector::cli::{self, LupaArgs, Mode};
+use area_selector::config::AppConfig;
+use area_selector::i18n::{self, Lang, Strings};
 use area_selector::lupa::{LupaApp, LupaOutcome};
 use area_selector::ui_selector::{self, AreaSelector, SelectorOutcome};
-use area_selector::{config, icon};
+use area_selector::{config, icon, theme};
 use eframe::egui::{self, ViewportBuilder, ViewportCommand};
 
 fn main() {
     attach_parent_console();
     init_logging();
     enable_dpi_awareness();
+    let cfg = config::load_config();
+    let s = i18n::tr(Lang::resolve(cfg.language));
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = match cli::parse(&args) {
         Ok(mode) => mode,
         Err(err) => {
-            eprintln!("Erro: {err}\n\n{}", cli::USAGE);
+            eprintln!("{}: {}\n\n{}", s.cli_error, err.message(s), s.cli_usage);
             std::process::exit(2);
         }
     };
 
     let result = match mode {
         Mode::Panel => run_panel(),
-        Mode::Selector => run_selector(),
-        Mode::Lupa(lupa) => run_lupa(lupa),
+        Mode::Selector => run_selector(cfg, s),
+        Mode::Lupa(lupa) => run_lupa(lupa, cfg, s),
     };
 
     if let Err(err) = result {
-        eprintln!("Erro: {err}");
+        eprintln!("{}: {err}", s.cli_error);
         std::process::exit(1);
     }
 }
@@ -42,23 +46,23 @@ fn run_panel() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport: viewport
-            .with_inner_size([460.0, 420.0])
-            .with_min_inner_size([420.0, 380.0])
+            .with_inner_size([600.0, 720.0])
+            .with_min_inner_size([320.0, 400.0])
             .with_resizable(true)
             .with_decorations(true)
             .with_transparent(false),
         ..Default::default()
     };
     eframe::run_native(
-        "Selecionador de Área",
+        "Area Selector",
         options,
-        Box::new(|_cc| Ok(Box::new(App::new()))),
+        Box::new(|cc| Ok(Box::new(App::new(&cc.egui_ctx)))),
     )
 }
 
 /// `area_selector seletor`: only the fullscreen selector; saves the area and exits.
-fn run_selector() -> eframe::Result {
-    struct SelectorRoot(AreaSelector);
+fn run_selector(cfg: AppConfig, s: &'static Strings) -> eframe::Result {
+    struct SelectorRoot(AreaSelector, &'static Strings);
 
     impl eframe::App for SelectorRoot {
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -66,9 +70,11 @@ fn run_selector() -> eframe::Result {
             match self.0.ui(ui) {
                 SelectorOutcome::Pending => {}
                 SelectorOutcome::Selected(area) => {
+                    let s = self.1;
+                    let (x, y, w, h) = area.to_rect_px();
                     match config::save_area(&area) {
-                        Ok(()) => println!("✅ Área salva: {:?}", area.to_rect_px()),
-                        Err(err) => eprintln!("Erro ao salvar a área: {err}"),
+                        Ok(()) => println!("{}", (s.cli_area_saved)(w, h, x, y)),
+                        Err(err) => eprintln!("{}", (s.cli_save_failed)(&err.to_string())),
                     }
                     ctx.send_viewport_cmd(ViewportCommand::Close);
                 }
@@ -78,7 +84,7 @@ fn run_selector() -> eframe::Result {
     }
 
     // Screenshot is taken before the overlay window exists.
-    let selector = AreaSelector::capture_screen();
+    let selector = AreaSelector::capture_screen().with_hint(s.selector_hint);
     let options = eframe::NativeOptions {
         viewport: AreaSelector::viewport_builder(ui_selector::primary_screen_size_px()),
         ..Default::default()
@@ -86,12 +92,15 @@ fn run_selector() -> eframe::Result {
     eframe::run_native(
         AreaSelector::TITLE,
         options,
-        Box::new(|_cc| Ok(Box::new(SelectorRoot(selector)))),
+        Box::new(move |cc| {
+            theme::apply(&cc.egui_ctx, &cfg.appearance);
+            Ok(Box::new(SelectorRoot(selector, s)))
+        }),
     )
 }
 
 /// `area_selector lupa ...`: only the magnifier window.
-fn run_lupa(args: LupaArgs) -> eframe::Result {
+fn run_lupa(args: LupaArgs, mut cfg: AppConfig, s: &'static Strings) -> eframe::Result {
     struct LupaRoot(LupaApp);
 
     impl eframe::App for LupaRoot {
@@ -102,13 +111,12 @@ fn run_lupa(args: LupaArgs) -> eframe::Result {
         }
     }
 
-    let mut cfg = config::load_config();
     if let Some([x, y]) = args.position {
         cfg.lupa_pos_x = x;
         cfg.lupa_pos_y = y;
         match config::save_config(&cfg) {
-            Ok(()) => println!("💾 Nova posição salva: ({x}, {y})"),
-            Err(err) => eprintln!("Erro ao salvar a posição: {err}"),
+            Ok(()) => println!("{}", (s.cli_position_saved)(x, y)),
+            Err(err) => eprintln!("{}", (s.cli_save_failed)(&err.to_string())),
         }
     }
 
@@ -120,6 +128,9 @@ fn run_lupa(args: LupaArgs) -> eframe::Result {
         system_pixels_per_point(),
     );
     lupa.frame_interval = cfg.lupa_frame_interval();
+    lupa.border_colors = cfg.appearance.border_preset.colors();
+    lupa.border_width = cfg.appearance.border_width;
+    lupa.loading_text = s.lupa_loading;
     let options = eframe::NativeOptions {
         viewport: lupa.viewport_builder(),
         ..Default::default()
@@ -127,7 +138,10 @@ fn run_lupa(args: LupaArgs) -> eframe::Result {
     eframe::run_native(
         LupaApp::TITLE,
         options,
-        Box::new(move |_cc| Ok(Box::new(LupaRoot(lupa)))),
+        Box::new(move |cc| {
+            theme::apply(&cc.egui_ctx, &cfg.appearance);
+            Ok(Box::new(LupaRoot(lupa)))
+        }),
     )
 }
 

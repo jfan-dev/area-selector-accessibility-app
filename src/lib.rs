@@ -1,7 +1,10 @@
 pub mod capture;
 pub mod cli;
 pub mod config;
+pub mod i18n;
 pub mod icon;
 pub mod lupa;
 pub mod model;
+pub mod theme;
 pub mod ui_selector;
+pub mod widgets;

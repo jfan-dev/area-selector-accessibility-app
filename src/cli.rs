@@ -1,11 +1,31 @@
 //! Command-line modes of the single executable.
 
-pub const USAGE: &str = "\
-Uso:
-  area_selector                       abre o painel principal
-  area_selector seletor               abre só o seletor de área
-  area_selector lupa <x> <y> <w> <h> [zoom|passthrough] [pos_x pos_y]
-                                      abre só a lupa";
+use crate::i18n::Strings;
+
+/// Invalid command line; [`CliError::message`] renders it in the user's language.
+/// The usage text is `Strings::cli_usage`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CliError {
+    UnknownMode(String),
+    SeletorTakesNoArgs,
+    LupaArgCount,
+    ZeroSize,
+    InvalidValue { name: &'static str, value: String },
+    InvalidZoom(String),
+}
+
+impl CliError {
+    pub fn message(&self, s: &Strings) -> String {
+        match self {
+            Self::UnknownMode(mode) => (s.cli_unknown_mode)(mode),
+            Self::SeletorTakesNoArgs => s.cli_seletor_no_args.to_owned(),
+            Self::LupaArgCount => s.cli_lupa_args.to_owned(),
+            Self::ZeroSize => s.cli_zero_size.to_owned(),
+            Self::InvalidValue { name, value } => (s.cli_invalid_value)(name, value),
+            Self::InvalidZoom(value) => (s.cli_invalid_zoom)(value),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mode {
@@ -28,22 +48,22 @@ pub struct LupaArgs {
 }
 
 /// Parses the arguments after the program name.
-pub fn parse(args: &[String]) -> Result<Mode, String> {
+pub fn parse(args: &[String]) -> Result<Mode, CliError> {
     let Some(mode) = args.first() else {
         return Ok(Mode::Panel);
     };
 
     match mode.as_str() {
         "seletor" if args.len() == 1 => Ok(Mode::Selector),
-        "seletor" => Err("'seletor' não aceita argumentos".into()),
+        "seletor" => Err(CliError::SeletorTakesNoArgs),
         "lupa" => parse_lupa(&args[1..]).map(Mode::Lupa),
-        other => Err(format!("modo desconhecido: '{other}'")),
+        other => Err(CliError::UnknownMode(other.to_owned())),
     }
 }
 
-fn parse_lupa(args: &[String]) -> Result<LupaArgs, String> {
+fn parse_lupa(args: &[String]) -> Result<LupaArgs, CliError> {
     if !(4..=7).contains(&args.len()) || args.len() == 6 {
-        return Err("'lupa' espera <x> <y> <w> <h> [zoom|passthrough] [pos_x pos_y]".into());
+        return Err(CliError::LupaArgCount);
     }
 
     let mut lupa = LupaArgs {
@@ -57,7 +77,7 @@ fn parse_lupa(args: &[String]) -> Result<LupaArgs, String> {
     };
 
     if lupa.w == 0 || lupa.h == 0 {
-        return Err("largura e altura precisam ser maiores que zero".into());
+        return Err(CliError::ZeroSize);
     }
 
     if let Some(mode) = args.get(4) {
@@ -66,7 +86,7 @@ fn parse_lupa(args: &[String]) -> Result<LupaArgs, String> {
         } else {
             let zoom: f32 = number(mode, "zoom")?;
             if !(zoom.is_finite() && zoom > 0.0) {
-                return Err(format!("zoom inválido: '{mode}'"));
+                return Err(CliError::InvalidZoom(mode.clone()));
             }
             lupa.zoom = Some(zoom);
         }
@@ -79,10 +99,11 @@ fn parse_lupa(args: &[String]) -> Result<LupaArgs, String> {
     Ok(lupa)
 }
 
-fn number<T: std::str::FromStr>(value: &str, name: &str) -> Result<T, String> {
-    value
-        .parse()
-        .map_err(|_| format!("valor inválido para {name}: '{value}'"))
+fn number<T: std::str::FromStr>(value: &str, name: &'static str) -> Result<T, CliError> {
+    value.parse().map_err(|_| CliError::InvalidValue {
+        name,
+        value: value.to_owned(),
+    })
 }
 
 #[cfg(test)]
@@ -152,6 +173,24 @@ mod tests {
 
     #[test]
     fn unknown_mode_is_error() {
-        assert!(parse(&args("lixo")).is_err());
+        assert_eq!(
+            parse(&args("lixo")),
+            Err(CliError::UnknownMode("lixo".into()))
+        );
+    }
+
+    #[test]
+    fn errors_are_translated() {
+        use crate::i18n::{tr, Lang};
+        let err = parse(&args("lupa 1 2 x 4")).unwrap_err();
+        assert_eq!(
+            err,
+            CliError::InvalidValue {
+                name: "w",
+                value: "x".into()
+            }
+        );
+        assert!(err.message(tr(Lang::Pt)).contains("valor inválido"));
+        assert!(err.message(tr(Lang::En)).contains("invalid value"));
     }
 }

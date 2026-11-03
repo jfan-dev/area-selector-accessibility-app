@@ -1,4 +1,6 @@
+use crate::i18n::Lang;
 use crate::model::Area;
+use eframe::egui::Color32;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -7,6 +9,81 @@ use std::time::{Duration, Instant};
 
 pub const DEFAULT_LUPA_FPS: u32 = 30;
 pub const LUPA_FPS_RANGE: std::ops::RangeInclusive<u32> = 5..=60;
+pub const LUPA_ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.5..=5.0;
+pub const UI_SCALE_RANGE: std::ops::RangeInclusive<f32> = 1.0..=2.0;
+pub const BORDER_WIDTH_RANGE: std::ops::RangeInclusive<f32> = 1.0..=10.0;
+
+/// Light/dark mode of the panel.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeMode {
+    /// Follow the Windows light/dark setting.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+/// Colours of the magnifier border: (interactive, passthrough).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BorderPreset {
+    /// Green / grey (the original look).
+    #[default]
+    GreenGrey,
+    /// Blue / orange from the Okabe–Ito palette, distinguishable with colour blindness.
+    BlueOrange,
+    /// Yellow / magenta, maximum visibility.
+    YellowMagenta,
+}
+
+impl BorderPreset {
+    pub const ALL: [Self; 3] = [Self::GreenGrey, Self::BlueOrange, Self::YellowMagenta];
+
+    /// `(interactive, passthrough)` border colours.
+    pub fn colors(self) -> (Color32, Color32) {
+        match self {
+            Self::GreenGrey => (
+                Color32::from_rgb(0, 220, 90),
+                Color32::from_rgb(170, 170, 170),
+            ),
+            Self::BlueOrange => (
+                Color32::from_rgb(0, 114, 178),
+                Color32::from_rgb(230, 159, 0),
+            ),
+            Self::YellowMagenta => (
+                Color32::from_rgb(255, 215, 0),
+                Color32::from_rgb(255, 0, 255),
+            ),
+        }
+    }
+}
+
+/// Look of the panel and the magnifier border.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(default)]
+pub struct Appearance {
+    pub theme: ThemeMode,
+    /// Extra-strong contrast (pure black/white, yellow/cyan accents).
+    pub high_contrast: bool,
+    /// Text and spacing scale of the panel, 1.0 = 100 %.
+    pub ui_scale: f32,
+    pub border_preset: BorderPreset,
+    /// Magnifier border thickness in points.
+    pub border_width: f32,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            theme: ThemeMode::System,
+            high_contrast: false,
+            ui_scale: 1.0,
+            border_preset: BorderPreset::GreenGrey,
+            border_width: 3.0,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AppConfig {
@@ -21,6 +98,11 @@ pub struct AppConfig {
     /// Whether the magnifier lets clicks through. Missing in older configs → off.
     #[serde(default)]
     pub lupa_passthrough: bool,
+    /// Panel language; `None` follows the Windows display language.
+    #[serde(default)]
+    pub language: Option<Lang>,
+    #[serde(default)]
+    pub appearance: Appearance,
 }
 
 fn default_lupa_fps() -> u32 {
@@ -36,6 +118,8 @@ impl Default for AppConfig {
             lupa_zoom: 1.0,
             lupa_fps: DEFAULT_LUPA_FPS,
             lupa_passthrough: false,
+            language: None,
+            appearance: Appearance::default(),
         }
     }
 }
@@ -192,6 +276,14 @@ mod tests {
             lupa_zoom: 2.5,
             lupa_fps: 45,
             lupa_passthrough: true,
+            language: Some(Lang::En),
+            appearance: Appearance {
+                theme: ThemeMode::Dark,
+                high_contrast: true,
+                ui_scale: 1.5,
+                border_preset: BorderPreset::BlueOrange,
+                border_width: 6.0,
+            },
         };
         save_config_to(&path, &cfg).unwrap();
         assert_eq!(load_config_from(&path), cfg);
@@ -230,6 +322,11 @@ mod tests {
             "older configs get the default fps"
         );
         assert!(!cfg.lupa_passthrough, "older configs start interactive");
+        assert_eq!(
+            cfg.language, None,
+            "older configs follow the Windows language"
+        );
+        assert_eq!(cfg.appearance, Appearance::default());
     }
 
     #[test]
@@ -302,5 +399,15 @@ mod tests {
         // Changing a value and putting it back before the delay needs no save.
         auto.poll(&changed(4.0), t0);
         assert_eq!(auto.poll(&cfg, t0), AutoSaveAction::Idle);
+    }
+
+    #[test]
+    fn partial_appearance_fills_missing_fields() {
+        let json = r#"{ "lupa_pos_x": 1.0, "lupa_pos_y": 2.0, "lupa_zoom": 1.0,
+                        "appearance": { "high_contrast": true } }"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        assert!(cfg.appearance.high_contrast);
+        assert_eq!(cfg.appearance.ui_scale, 1.0);
+        assert_eq!(cfg.appearance.border_preset, BorderPreset::GreenGrey);
     }
 }

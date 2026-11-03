@@ -1,4 +1,4 @@
-use crate::{capture, icon, model::Area};
+use crate::{capture, i18n, icon, model::Area};
 use eframe::egui::{self, *};
 
 /// Result of one frame of the area selector.
@@ -25,6 +25,7 @@ pub struct AreaSelector {
     end: Option<Pos2>,
     screenshot: Option<ColorImage>,
     texture: Option<TextureHandle>,
+    hint: &'static str,
 }
 
 impl AreaSelector {
@@ -40,8 +41,15 @@ impl AreaSelector {
         }
         Self {
             screenshot,
+            hint: i18n::PT.selector_hint,
             ..Self::default()
         }
+    }
+
+    /// Sets the instructions shown at the top of the overlay (translated text).
+    pub fn with_hint(mut self, hint: &'static str) -> Self {
+        self.hint = hint;
+        self
     }
 
     /// Borderless, always-on-top window covering the primary monitor
@@ -133,7 +141,7 @@ impl AreaSelector {
             }
 
             ui.label(
-                RichText::new("Clique e arraste para selecionar uma área. ESC cancela.")
+                RichText::new(self.hint)
                     .color(Color32::WHITE)
                     .background_color(Color32::from_black_alpha(160)),
             );

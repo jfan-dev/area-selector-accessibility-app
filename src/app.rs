@@ -1,6 +1,10 @@
-use area_selector::config::{self, AppConfig, AutoSave, AutoSaveAction, LUPA_FPS_RANGE};
+mod panel;
+
+use area_selector::config::{self, AppConfig, Appearance, AutoSave, AutoSaveAction};
+use area_selector::i18n::{self, Lang, Strings};
 use area_selector::lupa::{LupaApp, LupaOutcome};
 use area_selector::model::Area;
+use area_selector::theme;
 use area_selector::ui_selector::{self, AreaSelector, SelectorOutcome};
 use eframe::egui::{self, *};
 use std::io;
@@ -28,11 +32,17 @@ fn lock(lupa: &SharedLupa) -> MutexGuard<'_, LupaState> {
     lupa.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Short message shown at the bottom of the panel (e.g. "saved", or a save error).
+/// Short message shown in the panel footer (e.g. "saved", or a save error).
 struct Status {
     text: String,
     is_error: bool,
     until: Instant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Home,
+    Appearance,
 }
 
 /// Main control panel. Owns the selector and magnifier windows, which are child
@@ -47,18 +57,50 @@ pub struct App {
     status: Option<Status>,
     /// Settings are saved automatically shortly after they stop changing.
     autosave: AutoSave,
+    tab: Tab,
+    /// Windows display language, used when no language is configured.
+    system_lang: Lang,
+    /// Appearance last passed to [`theme::apply`], to re-apply only on change.
+    applied_appearance: Option<Appearance>,
+    /// Keyboard focus last frame, to scroll newly focused controls into view.
+    last_focus: Option<Id>,
+    /// How far the panel content sticks out past the window edge (layout tests).
+    #[cfg(test)]
+    layout_overflow: f32,
 }
 
 impl App {
-    pub fn new() -> Self {
-        let config = config::load_config();
-        Self {
+    pub fn new(ctx: &egui::Context) -> Self {
+        Self::with_config(ctx, config::load_config(), Lang::system())
+    }
+
+    fn with_config(ctx: &egui::Context, config: AppConfig, system_lang: Lang) -> Self {
+        let mut app = Self {
             saved_area: config.area,
             autosave: AutoSave::new(&config),
             config,
             selector: None,
             lupa: None,
             status: None,
+            tab: Tab::Home,
+            system_lang,
+            applied_appearance: None,
+            last_focus: None,
+            #[cfg(test)]
+            layout_overflow: 0.0,
+        };
+        app.apply_theme(ctx);
+        app
+    }
+
+    fn strings(&self) -> &'static Strings {
+        i18n::tr(self.config.language.unwrap_or(self.system_lang))
+    }
+
+    fn apply_theme(&mut self, ctx: &egui::Context) {
+        if self.applied_appearance.as_ref() != Some(&self.config.appearance) {
+            theme::apply(ctx, &self.config.appearance);
+            self.applied_appearance = Some(self.config.appearance.clone());
         }
     }
 
@@ -67,7 +109,7 @@ impl App {
     }
 
     /// Reports the result of a config save in the panel (and the log, for errors).
-    fn report_save(&mut self, result: io::Result<()>, success: Option<&str>) {
+    fn report_save(&mut self, result: io::Result<()>, success: Option<&'static str>) {
         let (text, is_error, duration) = match result {
             Ok(()) => match success {
                 Some(text) => (text.to_owned(), false, Duration::from_secs(2)),
@@ -75,11 +117,8 @@ impl App {
             },
             Err(err) => {
                 log::error!("could not save config: {err}");
-                (
-                    format!("⚠ Erro ao salvar configurações: {err}"),
-                    true,
-                    Duration::from_secs(8),
-                )
+                let text = (self.strings().save_error)(&err.to_string());
+                (text, true, Duration::from_secs(8))
             }
         };
         self.status = Some(Status {
@@ -90,7 +129,7 @@ impl App {
     }
 
     /// Writes the settings now and reports the result in the panel.
-    fn save_now(&mut self, success: Option<&str>) {
+    fn save_now(&mut self, success: Option<&'static str>) {
         let result = config::save_config(&self.config);
         // Also on error: retrying every frame would only repeat the same error.
         // The next change triggers a new attempt.
@@ -98,12 +137,12 @@ impl App {
         self.report_save(result, success);
     }
 
-    /// Saves pending slider changes once they have been stable for a moment.
+    /// Saves pending changes once they have been stable for a moment.
     fn autosave(&mut self, ctx: &egui::Context) {
         match self.autosave.poll(&self.config, Instant::now()) {
             AutoSaveAction::Idle => {}
             AutoSaveAction::Wait(remaining) => ctx.request_repaint_after(remaining),
-            AutoSaveAction::SaveNow => self.save_now(Some("✔️ Configurações salvas")),
+            AutoSaveAction::SaveNow => self.save_now(Some(self.strings().saved_settings)),
         }
     }
 
@@ -125,10 +164,16 @@ impl App {
         self.lupa = Some(Arc::new(Mutex::new(LupaState { app, closed: false })));
     }
 
-    /// Flips the saved click-through mode (auto-saved like the sliders). An open
-    /// magnifier follows it on the next frame; otherwise it applies on the next open.
-    fn toggle_passthrough(&mut self) {
-        self.config.lupa_passthrough = !self.config.lupa_passthrough;
+    fn close_lupa(&mut self) {
+        self.lupa = None;
+    }
+
+    fn open_selector(&mut self) {
+        if self.selector.is_none() {
+            // Screenshot is taken now, before the overlay window exists.
+            let hint = self.strings().selector_hint;
+            self.selector = Some(AreaSelector::capture_screen().with_hint(hint));
+        }
     }
 
     fn show_selector(&mut self, ctx: &egui::Context) {
@@ -144,7 +189,7 @@ impl App {
             SelectorOutcome::Selected(area) => {
                 self.saved_area = Some(area);
                 self.config.area = Some(area);
-                self.save_now(Some("✔️ Área salva!"));
+                self.save_now(Some(self.strings().saved_area));
                 self.selector = None;
             }
             SelectorOutcome::Cancelled => self.selector = None,
@@ -163,18 +208,25 @@ impl App {
         let zoom = self.config.lupa_zoom;
         let passthrough = self.config.lupa_passthrough;
         let frame_interval = self.config.lupa_frame_interval();
+        let border_colors = self.config.appearance.border_preset.colors();
+        let border_width = self.config.appearance.border_width;
+        let loading_text = self.strings().lupa_loading;
         let Some(lupa) = &self.lupa else {
             return;
         };
 
         let builder = {
             let mut state = lock(lupa);
-            // Live updates: slider changes apply to the open magnifier immediately.
-            state.app.zoom = zoom;
-            state.app.position = position;
-            state.app.passthrough = passthrough;
-            state.app.frame_interval = frame_interval;
-            state.app.viewport_builder()
+            // Live updates: panel changes apply to the open magnifier immediately.
+            let app = &mut state.app;
+            app.zoom = zoom;
+            app.position = position;
+            app.passthrough = passthrough;
+            app.frame_interval = frame_interval;
+            app.border_colors = border_colors;
+            app.border_width = border_width;
+            app.loading_text = loading_text;
+            app.viewport_builder()
         };
 
         let shared = Arc::clone(lupa);
@@ -190,107 +242,12 @@ impl App {
             }
         });
     }
-
-    fn status_ui(&mut self, ui: &mut Ui) {
-        let Some(status) = &self.status else {
-            return;
-        };
-        let now = Instant::now();
-        if now >= status.until {
-            self.status = None;
-            return;
-        }
-        let color = if status.is_error {
-            ui.visuals().error_fg_color
-        } else {
-            Color32::from_rgb(80, 200, 120)
-        };
-        ui.colored_label(color, &status.text);
-        ui.ctx().request_repaint_after(status.until - now);
-    }
-
-    fn panel_ui(&mut self, ui: &mut Ui) {
-        let ctx = &ui.ctx().clone();
-        let screen = ui_selector::screen_size(ctx);
-
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.heading("🖥️ Área Selector");
-
-                if ui.button("Selecionar Área").clicked() && self.selector.is_none() {
-                    // Screenshot is taken now, before the overlay window exists.
-                    self.selector = Some(AreaSelector::capture_screen());
-                }
-
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(self.saved_area.is_some(), Button::new("Iniciar Lupa"))
-                        .clicked()
-                    {
-                        self.open_lupa(ctx);
-                    }
-
-                    let passthrough_label = if self.config.lupa_passthrough {
-                        "Passthrough: ligado"
-                    } else {
-                        "Passthrough: desligado"
-                    };
-                    if ui
-                        .button(passthrough_label)
-                        .on_hover_text("Alternar Lupa Passthrough: cliques atravessam a lupa")
-                        .clicked()
-                    {
-                        self.toggle_passthrough();
-                    }
-
-                    // A passthrough magnifier can't receive clicks or ESC, so it is closed from here.
-                    if ui
-                        .add_enabled(self.lupa.is_some(), Button::new("Fechar Lupa"))
-                        .clicked()
-                    {
-                        self.lupa = None;
-                    }
-                });
-
-                ui.separator();
-
-                ui.heading("Configurações da Lupa");
-                ui.add(Slider::new(&mut self.config.lupa_zoom, 0.5..=5.0).text("Zoom"));
-                ui.add(Slider::new(&mut self.config.lupa_pos_x, 0.0..=screen.x).text("Posição X"));
-                ui.add(Slider::new(&mut self.config.lupa_pos_y, 0.0..=screen.y).text("Posição Y"));
-                ui.add(Slider::new(&mut self.config.lupa_fps, LUPA_FPS_RANGE).text("FPS"));
-
-                ui.weak("As configurações são salvas automaticamente.");
-
-                ui.separator();
-
-                match self.saved_area {
-                    Some(area) => {
-                        let (x, y, w, h) = area.to_rect_px();
-                        ui.label(format!("Área salva: {w}×{h} px em ({x}, {y})"));
-                    }
-                    None => {
-                        ui.label("Nenhuma área salva ainda.");
-                    }
-                }
-
-                ui.separator();
-
-                if ui.button("❌ Sair").clicked() {
-                    ctx.send_viewport_cmd(ViewportCommand::Close);
-                }
-
-                self.status_ui(ui);
-            });
-        });
-    }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = &ui.ctx().clone();
+        self.apply_theme(ctx);
         self.reap_closed_lupa();
         self.panel_ui(ui);
         self.show_selector(ctx);
@@ -303,6 +260,54 @@ impl eframe::App for App {
         if self.autosave.has_unsaved_changes(&self.config) {
             if let Err(err) = config::save_config(&self.config) {
                 log::error!("could not save config on exit: {err}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use area_selector::model::SerializablePos;
+
+    /// Renders the real panel headlessly and returns how far its content sticks out
+    /// past the window's right edge (0 = everything fits).
+    fn overflow(lang: Lang, width: f32, ui_scale: f32, tab: Tab) -> f32 {
+        let ctx = egui::Context::default();
+        let mut config = AppConfig::default();
+        config.appearance.ui_scale = ui_scale;
+        config.area = Some(Area {
+            start: SerializablePos { x: 10.0, y: 20.0 },
+            end: SerializablePos { x: 304.0, y: 234.0 },
+        });
+        let mut app = App::with_config(&ctx, config, lang);
+        app.tab = tab;
+        let input = || RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 720.0))),
+            ..Default::default()
+        };
+        // A few passes so egui's remembered sizes settle.
+        for _ in 0..4 {
+            let mut output = ctx.run_ui(input(), |ui| app.panel_ui(ui));
+            output.textures_delta.clear(); // no GPU here: discard texture uploads
+        }
+        app.layout_overflow
+    }
+
+    #[test]
+    fn panel_fits_every_window_width_and_text_size() {
+        for lang in Lang::ALL {
+            for width in [320.0, 400.0, 480.0, 600.0, 900.0] {
+                for scale in [1.0, 1.5, 2.0] {
+                    for tab in [Tab::Home, Tab::Appearance] {
+                        let over = overflow(lang, width, scale, tab);
+                        assert!(
+                            over <= 1.0,
+                            "{lang:?} {tab:?} at {width} px, {:.0}%: content is {over:.0} px too wide",
+                            scale * 100.0
+                        );
+                    }
+                }
             }
         }
     }
