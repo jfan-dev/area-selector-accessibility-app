@@ -1,7 +1,7 @@
+use area_selector::config::{self, AppConfig};
+use area_selector::model::Area;
 use eframe::egui::{self, *};
-use crate::model::Area;
-use crate::config::{self, AppConfig};
-use std::process::{Command, Child};
+use std::process::{Child, Command};
 
 pub struct App {
     saved_area: Option<Area>,
@@ -25,12 +25,9 @@ impl App {
         Self::default()
     }
 
-    fn area_to_xywh(area: crate::model::Area) -> [String; 4] {
-        let x = area.start.x.min(area.end.x).round() as u32;
-        let y = area.start.y.min(area.end.y).round() as u32;
-        let w = (area.start.x - area.end.x).abs().round() as u32;
-        let h = (area.start.y - area.end.y).abs().round() as u32;
-        [x.to_string(), y.to_string(), w.to_string(), h.to_string()]
+    fn area_args(area: Area) -> [String; 4] {
+        let (x, y, w, h) = area.to_rect_px();
+        [x, y, w, h].map(|v| v.to_string())
     }
 }
 
@@ -68,9 +65,12 @@ impl eframe::App for App {
                 ui.separator();
 
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(self.saved_area.is_some(), Button::new("Iniciar Lupa")).clicked() {
+                    if ui
+                        .add_enabled(self.saved_area.is_some(), Button::new("Iniciar Lupa"))
+                        .clicked()
+                    {
                         if let Some(area) = self.saved_area {
-                            let [x, y, w, h] = Self::area_to_xywh(area);
+                            let [x, y, w, h] = Self::area_args(area);
                             let exe = std::env::current_exe().unwrap().with_file_name("lupa.exe");
                             let zoom = self.config.lupa_zoom.to_string();
                             let pos_x = self.config.lupa_pos_x.to_string();
@@ -84,7 +84,7 @@ impl eframe::App for App {
 
                     if ui.button("Alternar Lupa Passthrough").clicked() {
                         if let Some(area) = self.saved_area {
-                            let [x, y, w, h] = Self::area_to_xywh(area);
+                            let [x, y, w, h] = Self::area_args(area);
                             let exe = std::env::current_exe().unwrap().with_file_name("lupa.exe");
 
                             let hwnd_path = dirs::config_dir()
@@ -96,7 +96,7 @@ impl eframe::App for App {
                             let mut hwnd_val: Option<isize> = None;
 
                             if let Ok(data) = std::fs::read_to_string(&hwnd_path) {
-                                if let Ok(val) = usize::from_str_radix(data.trim(), 10) {
+                                if let Ok(val) = data.trim().parse::<usize>() {
                                     use windows::Win32::UI::WindowsAndMessaging::*;
                                     unsafe {
                                         let hwnd = windows::Win32::Foundation::HWND(val as *mut _);

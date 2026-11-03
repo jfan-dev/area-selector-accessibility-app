@@ -85,6 +85,11 @@ cargo wbuild --release
 
 # 4. Run (WSL only — opens on the Windows desktop)
 cargo wrun --release --bin area_selector
+
+# Checks (tests run as Windows executables through WSL interop)
+cargo wtest
+cargo wclippy
+cargo fmt --check
 ```
 
 If running from inside the WSL filesystem is slow, copy the release folder to the Windows side

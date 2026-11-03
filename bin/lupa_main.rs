@@ -1,10 +1,7 @@
-use area_selector::{lupa::LupaApp, config};
+use area_selector::{config, lupa::LupaApp};
 use eframe::egui::{self, ViewportBuilder};
 use std::{fs, path::PathBuf, thread, time::Duration};
-use windows::{
-    Win32::Foundation::*,
-    Win32::UI::WindowsAndMessaging::*,
-};
+use windows::{Win32::Foundation::*, Win32::UI::WindowsAndMessaging::*};
 
 fn hwnd_file_path() -> PathBuf {
     let dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -41,7 +38,10 @@ fn main() -> eframe::Result<()> {
         cfg.lupa_pos_x = args[6].parse::<f32>().unwrap_or(cfg.lupa_pos_x);
         cfg.lupa_pos_y = args[7].parse::<f32>().unwrap_or(cfg.lupa_pos_y);
         config::save_config(&cfg);
-        println!("💾 Nova posição salva: ({}, {})", cfg.lupa_pos_x, cfg.lupa_pos_y);
+        println!(
+            "💾 Nova posição salva: ({}, {})",
+            cfg.lupa_pos_x, cfg.lupa_pos_y
+        );
     }
 
     let area = (x, y, w, h);
@@ -83,7 +83,9 @@ struct LupaWithExit {
 
 impl LupaWithExit {
     fn new(area: (u32, u32, u32, u32), zoom: f32, interactive: bool) -> Self {
-        Self { lupa: LupaApp::new(area, zoom, interactive) }
+        Self {
+            lupa: LupaApp::new(area, zoom, interactive),
+        }
     }
 }
 
@@ -98,7 +100,11 @@ impl eframe::App for LupaWithExit {
 
 unsafe fn get_foreground_hwnd() -> Option<HWND> {
     let hwnd = GetForegroundWindow();
-    if hwnd.0.is_null() { None } else { Some(hwnd) }
+    if hwnd.0.is_null() {
+        None
+    } else {
+        Some(hwnd)
+    }
 }
 
 fn save_hwnd(hwnd: HWND) {
@@ -106,15 +112,6 @@ fn save_hwnd(hwnd: HWND) {
         let _ = fs::create_dir_all(parent);
     }
     let _ = fs::write(hwnd_file_path(), format!("{}", hwnd.0 as usize));
-}
-
-fn load_hwnd() -> Option<HWND> {
-    if let Ok(data) = fs::read_to_string(hwnd_file_path()) {
-        if let Ok(val) = usize::from_str_radix(data.trim(), 10) {
-            return Some(HWND(val as *mut _));
-        }
-    }
-    None
 }
 
 unsafe fn set_passthrough(hwnd: HWND, enable: bool) {

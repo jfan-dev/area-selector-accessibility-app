@@ -1,12 +1,7 @@
 mod app;
-mod config;
-mod model;
-mod capture;
-mod lupa;
-mod ui_selector;
 
-use eframe::egui::ViewportBuilder;
 use app::App;
+use eframe::egui::ViewportBuilder;
 
 fn main() -> eframe::Result<()> {
     eframe::run_native(

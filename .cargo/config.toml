@@ -6,3 +6,5 @@ linker = "x86_64-w64-mingw32-gcc"
 [alias]
 wbuild = "build --target x86_64-pc-windows-gnu"
 wrun = "run --target x86_64-pc-windows-gnu"
+wtest = "test --target x86_64-pc-windows-gnu"
+wclippy = "clippy --target x86_64-pc-windows-gnu --all-targets -- -D warnings"

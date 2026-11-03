@@ -2,7 +2,7 @@ use area_selector::ui_selector::AreaSelector;
 use eframe::{egui::ViewportBuilder, Renderer};
 
 // Importações atualizadas para windows 0.58
-use windows::Win32::UI::WindowsAndMessaging::{SM_CXSCREEN, SM_CYSCREEN, GetSystemMetrics};
+use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 
 fn main() -> eframe::Result<()> {
     // Captura tamanho da tela via API do Windows

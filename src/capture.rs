@@ -17,30 +17,23 @@ pub fn capture_area(x: u32, y: u32, w: u32, h: u32) -> Option<RgbaImage> {
 
         let hbitmap = CreateCompatibleBitmap(hdc_screen, w as i32, h as i32);
         if hbitmap.0.is_null() {
-            DeleteDC(hdc_mem);
+            let _ = DeleteDC(hdc_mem);
             ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
             return None;
         }
 
         let old_obj = SelectObject(hdc_mem, HGDIOBJ(hbitmap.0));
         if old_obj.0.is_null() {
-            DeleteObject(HGDIOBJ(hbitmap.0));
-            DeleteDC(hdc_mem);
+            let _ = DeleteObject(HGDIOBJ(hbitmap.0));
+            let _ = DeleteDC(hdc_mem);
             ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
             return None;
         }
 
         if BitBlt(
-            hdc_mem,
-            0,
-            0,
-            w as i32,
-            h as i32,
-            hdc_screen,
-            x as i32,
-            y as i32,
-            SRCCOPY,
-        ).is_ok()
+            hdc_mem, 0, 0, w as i32, h as i32, hdc_screen, x as i32, y as i32, SRCCOPY,
+        )
+        .is_ok()
         {
             let mut bmp_info = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
@@ -49,7 +42,7 @@ pub fn capture_area(x: u32, y: u32, w: u32, h: u32) -> Option<RgbaImage> {
                     biHeight: -(h as i32),
                     biPlanes: 1,
                     biBitCount: 32,
-                    biCompression: BI_RGB.0 as u32,
+                    biCompression: BI_RGB.0,
                     biSizeImage: 0,
                     biXPelsPerMeter: 0,
                     biYPelsPerMeter: 0,
@@ -71,7 +64,7 @@ pub fn capture_area(x: u32, y: u32, w: u32, h: u32) -> Option<RgbaImage> {
                 hdc_mem,
                 hbitmap,
                 0,
-                h as u32,
+                h,
                 Some(buffer.as_mut_ptr() as *mut _),
                 &mut bmp_info,
                 DIB_RGB_COLORS,
@@ -85,22 +78,13 @@ pub fn capture_area(x: u32, y: u32, w: u32, h: u32) -> Option<RgbaImage> {
                         if i + 3 >= buffer.len() {
                             continue;
                         }
-                        img.put_pixel(
-                            ix,
-                            iy,
-                            Rgba([
-                                buffer[i + 2],
-                                buffer[i + 1],
-                                buffer[i],
-                                255,
-                            ]),
-                        );
+                        img.put_pixel(ix, iy, Rgba([buffer[i + 2], buffer[i + 1], buffer[i], 255]));
                     }
                 }
 
                 SelectObject(hdc_mem, old_obj);
-                DeleteObject(HGDIOBJ(hbitmap.0));
-                DeleteDC(hdc_mem);
+                let _ = DeleteObject(HGDIOBJ(hbitmap.0));
+                let _ = DeleteDC(hdc_mem);
                 ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
 
                 return Some(img);
@@ -108,8 +92,8 @@ pub fn capture_area(x: u32, y: u32, w: u32, h: u32) -> Option<RgbaImage> {
         }
 
         SelectObject(hdc_mem, old_obj);
-        DeleteObject(HGDIOBJ(hbitmap.0));
-        DeleteDC(hdc_mem);
+        let _ = DeleteObject(HGDIOBJ(hbitmap.0));
+        let _ = DeleteDC(hdc_mem);
         ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
 
         None

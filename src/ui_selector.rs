@@ -1,20 +1,11 @@
-use eframe::egui::{self, *};
 use crate::{config, model::Area as ScreenArea};
+use eframe::egui::{self, *};
 
+#[derive(Default)]
 pub struct AreaSelector {
     selecting: bool,
     start: Option<Pos2>,
     end: Option<Pos2>,
-}
-
-impl Default for AreaSelector {
-    fn default() -> Self {
-        Self {
-            selecting: false,
-            start: None,
-            end: None,
-        }
-    }
 }
 
 impl eframe::App for AreaSelector {
@@ -25,11 +16,7 @@ impl eframe::App for AreaSelector {
                 let rect = ui.max_rect();
                 let painter = ui.painter_at(rect);
 
-                painter.rect_filled(
-                    rect,
-                    0.0,
-                    Color32::from_rgba_unmultiplied(0, 0, 0, 12),
-                );
+                painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(0, 0, 0, 12));
 
                 if ctx.input(|i| i.pointer.primary_down()) {
                     if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
@@ -56,9 +43,9 @@ impl eframe::App for AreaSelector {
                 if let (Some(start), Some(end)) = (self.start, self.end) {
                     painter.rect(
                         Rect::from_two_pos(start, end),
-                        0.0,
+                        Rounding::ZERO,
                         Color32::from_rgba_unmultiplied(100, 150, 255, 100),
-                        Stroke::new(1.0, Color32::BLUE),
+                        Stroke::new(1.0_f32, Color32::BLUE),
                     );
                 }
 

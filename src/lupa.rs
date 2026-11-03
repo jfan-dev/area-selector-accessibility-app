@@ -1,5 +1,5 @@
-use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions, Frame};
 use crate::capture;
+use eframe::egui::{self, ColorImage, Frame, TextureHandle, TextureOptions};
 use std::time::Duration;
 
 pub struct LupaApp {
@@ -22,7 +22,8 @@ impl LupaApp {
     }
 
     fn update_texture(&mut self, ctx: &egui::Context) {
-        if let Some(img) = capture::capture_area(self.area.0, self.area.1, self.area.2, self.area.3) {
+        if let Some(img) = capture::capture_area(self.area.0, self.area.1, self.area.2, self.area.3)
+        {
             let size = [img.width() as usize, img.height() as usize];
             self.buffer.clear();
             self.buffer.reserve(size[0] * size[1] * 4);
@@ -35,11 +36,8 @@ impl LupaApp {
             if let Some(tex) = &mut self.texture {
                 tex.set(image, TextureOptions::LINEAR);
             } else {
-                self.texture = Some(ctx.load_texture(
-                    "lupa_texture",
-                    image,
-                    TextureOptions::LINEAR,
-                ));
+                self.texture =
+                    Some(ctx.load_texture("lupa_texture", image, TextureOptions::LINEAR));
             }
         }
     }
@@ -67,7 +65,11 @@ impl eframe::App for LupaApp {
                 } else {
                     egui::Color32::from_rgb(180, 180, 180)
                 };
-                painter.rect_stroke(rect, 0.0, egui::Stroke::new(3.0, color));
+                painter.rect_stroke(
+                    rect,
+                    egui::Rounding::ZERO,
+                    egui::Stroke::new(3.0_f32, color),
+                );
             });
 
         ctx.request_repaint_after(Duration::from_millis(50));
