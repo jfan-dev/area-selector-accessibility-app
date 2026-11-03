@@ -1,13 +1,17 @@
+// Release builds are GUI-only (no console window). Debug builds keep the console for logs.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app;
 
 use app::App;
 use area_selector::cli::{self, LupaArgs, Mode};
-use area_selector::config;
 use area_selector::lupa::{LupaApp, LupaOutcome};
 use area_selector::ui_selector::{self, AreaSelector, SelectorOutcome};
+use area_selector::{config, icon};
 use eframe::egui::{self, ViewportBuilder, ViewportCommand};
 
 fn main() {
+    attach_parent_console();
     enable_dpi_awareness();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mode = match cli::parse(&args) {
@@ -31,8 +35,12 @@ fn main() {
 }
 
 fn run_panel() -> eframe::Result<()> {
+    let mut viewport = ViewportBuilder::default();
+    if let Some(icon) = icon::app_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: ViewportBuilder::default()
+        viewport: viewport
             .with_inner_size([400.0, 200.0])
             .with_resizable(false)
             .with_decorations(true)
@@ -123,5 +131,15 @@ fn enable_dpi_awareness() {
     };
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+}
+
+/// Without a console window (release builds), CLI messages such as usage errors would be
+/// lost. When started from a terminal, write them to that terminal instead. When started
+/// by double-click there is no parent console and this does nothing.
+fn attach_parent_console() {
+    use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+    unsafe {
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
     }
 }

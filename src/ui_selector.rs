@@ -1,4 +1,4 @@
-use crate::{capture, model::Area};
+use crate::{capture, icon, model::Area};
 use eframe::egui::{self, *};
 
 /// Result of one frame of the area selector.
@@ -48,7 +48,11 @@ impl AreaSelector {
     /// Borderless, always-on-top window covering the primary monitor
     /// (`screen_size` in points).
     pub fn viewport_builder(screen_size: Vec2) -> ViewportBuilder {
-        ViewportBuilder::default()
+        let builder = match icon::app_icon() {
+            Some(icon) => ViewportBuilder::default().with_icon(icon),
+            None => ViewportBuilder::default(),
+        };
+        builder
             .with_title(Self::TITLE)
             .with_inner_size(screen_size)
             .with_position([0.0, 0.0])

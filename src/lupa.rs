@@ -1,4 +1,4 @@
-use crate::capture;
+use crate::{capture, icon};
 use eframe::egui::{self, ColorImage, Frame, TextureHandle, TextureOptions, ViewportBuilder};
 use std::time::Duration;
 
@@ -43,7 +43,11 @@ impl LupaApp {
     /// Re-sent every frame: egui only issues window commands for fields that changed.
     pub fn viewport_builder(&self) -> ViewportBuilder {
         let (_, _, w, h) = self.area;
-        ViewportBuilder::default()
+        let builder = match icon::app_icon() {
+            Some(icon) => ViewportBuilder::default().with_icon(icon),
+            None => ViewportBuilder::default(),
+        };
+        builder
             .with_title(Self::TITLE)
             .with_inner_size([w as f32 * self.zoom, h as f32 * self.zoom])
             .with_position(self.position)
