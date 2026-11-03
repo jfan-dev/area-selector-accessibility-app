@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_LUPA_FPS: u32 = 30;
 pub const LUPA_FPS_RANGE: std::ops::RangeInclusive<u32> = 5..=60;
@@ -17,6 +18,9 @@ pub struct AppConfig {
     /// Magnifier refresh rate. Missing in configs from older versions → default.
     #[serde(default = "default_lupa_fps")]
     pub lupa_fps: u32,
+    /// Whether the magnifier lets clicks through. Missing in older configs → off.
+    #[serde(default)]
+    pub lupa_passthrough: bool,
 }
 
 fn default_lupa_fps() -> u32 {
@@ -31,17 +35,82 @@ impl Default for AppConfig {
             lupa_pos_y: 100.0,
             lupa_zoom: 1.0,
             lupa_fps: DEFAULT_LUPA_FPS,
+            lupa_passthrough: false,
         }
     }
 }
 
 impl AppConfig {
     /// Frame interval for the magnifier, with the fps clamped to a sane range.
-    pub fn lupa_frame_interval(&self) -> std::time::Duration {
+    pub fn lupa_frame_interval(&self) -> Duration {
         let fps = self
             .lupa_fps
             .clamp(*LUPA_FPS_RANGE.start(), *LUPA_FPS_RANGE.end());
-        std::time::Duration::from_secs(1) / fps
+        Duration::from_secs(1) / fps
+    }
+}
+
+/// How long settings must stay unchanged before they are written to disk, so dragging
+/// a slider doesn't write the file on every frame.
+pub const AUTOSAVE_DELAY: Duration = Duration::from_millis(500);
+
+/// What [`AutoSave::poll`] asks the caller to do.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AutoSaveAction {
+    /// Nothing changed since the last save.
+    Idle,
+    /// Settings changed recently; poll again after this long.
+    Wait(Duration),
+    /// Settings have been stable for [`AUTOSAVE_DELAY`]; save them now.
+    SaveNow,
+}
+
+/// Debounced auto-save: tracks the last saved settings and when they last changed.
+/// Time is passed in, so the logic is testable without real timers.
+#[derive(Debug, Clone)]
+pub struct AutoSave {
+    saved: AppConfig,
+    last_seen: AppConfig,
+    changed_at: Option<Instant>,
+}
+
+impl AutoSave {
+    pub fn new(saved: &AppConfig) -> Self {
+        Self {
+            saved: saved.clone(),
+            last_seen: saved.clone(),
+            changed_at: None,
+        }
+    }
+
+    /// Call once per frame with the current settings.
+    pub fn poll(&mut self, current: &AppConfig, now: Instant) -> AutoSaveAction {
+        if *current == self.saved {
+            self.last_seen = current.clone();
+            self.changed_at = None;
+            return AutoSaveAction::Idle;
+        }
+        if *current != self.last_seen || self.changed_at.is_none() {
+            self.last_seen = current.clone();
+            self.changed_at = Some(now);
+        }
+        let elapsed = now.saturating_duration_since(self.changed_at.unwrap_or(now));
+        if elapsed >= AUTOSAVE_DELAY {
+            AutoSaveAction::SaveNow
+        } else {
+            AutoSaveAction::Wait(AUTOSAVE_DELAY - elapsed)
+        }
+    }
+
+    /// Records that `cfg` is what is on disk now.
+    pub fn mark_saved(&mut self, cfg: &AppConfig) {
+        self.saved = cfg.clone();
+        self.last_seen = cfg.clone();
+        self.changed_at = None;
+    }
+
+    pub fn has_unsaved_changes(&self, current: &AppConfig) -> bool {
+        *current != self.saved
     }
 }
 
@@ -122,6 +191,7 @@ mod tests {
             lupa_pos_y: 60.0,
             lupa_zoom: 2.5,
             lupa_fps: 45,
+            lupa_passthrough: true,
         };
         save_config_to(&path, &cfg).unwrap();
         assert_eq!(load_config_from(&path), cfg);
@@ -159,6 +229,7 @@ mod tests {
             cfg.lupa_fps, DEFAULT_LUPA_FPS,
             "older configs get the default fps"
         );
+        assert!(!cfg.lupa_passthrough, "older configs start interactive");
     }
 
     #[test]
@@ -169,5 +240,67 @@ mod tests {
         assert_eq!(cfg.lupa_frame_interval().as_millis(), 200);
         cfg.lupa_fps = 1000;
         assert_eq!(cfg.lupa_frame_interval().as_millis(), 16);
+    }
+
+    fn changed(zoom: f32) -> AppConfig {
+        AppConfig {
+            lupa_zoom: zoom,
+            ..AppConfig::default()
+        }
+    }
+
+    #[test]
+    fn autosave_is_idle_without_changes() {
+        let cfg = AppConfig::default();
+        let mut auto = AutoSave::new(&cfg);
+        assert_eq!(auto.poll(&cfg, Instant::now()), AutoSaveAction::Idle);
+        assert!(!auto.has_unsaved_changes(&cfg));
+    }
+
+    #[test]
+    fn autosave_waits_then_saves_after_delay() {
+        let mut auto = AutoSave::new(&AppConfig::default());
+        let t0 = Instant::now();
+        let cfg = changed(2.0);
+        assert_eq!(auto.poll(&cfg, t0), AutoSaveAction::Wait(AUTOSAVE_DELAY));
+        let ms = |n| t0 + Duration::from_millis(n);
+        assert_eq!(
+            auto.poll(&cfg, ms(200)),
+            AutoSaveAction::Wait(Duration::from_millis(300))
+        );
+        assert_eq!(auto.poll(&cfg, ms(500)), AutoSaveAction::SaveNow);
+    }
+
+    #[test]
+    fn autosave_restarts_delay_while_still_changing() {
+        let mut auto = AutoSave::new(&AppConfig::default());
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        auto.poll(&changed(1.5), t0);
+        // Still dragging the slider at 400 ms: the delay starts over.
+        assert_eq!(
+            auto.poll(&changed(1.8), ms(400)),
+            AutoSaveAction::Wait(AUTOSAVE_DELAY)
+        );
+        assert!(matches!(
+            auto.poll(&changed(1.8), ms(800)),
+            AutoSaveAction::Wait(_)
+        ));
+        assert_eq!(auto.poll(&changed(1.8), ms(900)), AutoSaveAction::SaveNow);
+    }
+
+    #[test]
+    fn autosave_is_idle_after_mark_saved_or_revert() {
+        let original = AppConfig::default();
+        let mut auto = AutoSave::new(&original);
+        let t0 = Instant::now();
+        let cfg = changed(3.0);
+        auto.poll(&cfg, t0);
+        auto.mark_saved(&cfg);
+        assert_eq!(auto.poll(&cfg, t0), AutoSaveAction::Idle);
+
+        // Changing a value and putting it back before the delay needs no save.
+        auto.poll(&changed(4.0), t0);
+        assert_eq!(auto.poll(&cfg, t0), AutoSaveAction::Idle);
     }
 }

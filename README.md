@@ -6,7 +6,7 @@ This application is designed to assist video game players with limited field of 
 It enables precise selection of any region on the screen and magnifies it through an adjustable, accessibility-friendly zoom window (“Lupa”).
 
 The tool allows users to reposition and resize the magnified area, control zoom intensity and refresh rate, and toggle passthrough mode (allowing clicks to pass through the magnifier).
-Settings are stored in your user profile, so the area, zoom and position are restored the next time you open the app.
+All settings are saved automatically to your user profile, so the area, zoom, position, FPS and passthrough mode are restored the next time you open the app.
 Everything ships as **one standalone `area_selector.exe`** — no installer, no extra files, no runtime DLLs.
 
 ![Description gif image](./assets/area-selector-gif.gif)
@@ -34,16 +34,15 @@ That's it — the single executable contains the control panel, the area selecto
 | Control | What it does |
 |---------|--------------|
 | **Selecionar Área** | Opens a fullscreen overlay over a dimmed screenshot of your screen. Click and drag to select the region to magnify (the selection is shown at full brightness). **ESC** cancels. |
-| **Iniciar Lupa** | Opens the magnifier window on the saved area (green border = interactive). Press **ESC** on it to close it. |
-| **Alternar Lupa Passthrough** | Turns click-through on/off: the border turns grey and mouse clicks go to the game underneath. Opens the magnifier in passthrough mode if it isn't open. |
+| **Iniciar Lupa** | Opens the magnifier window on the saved area, in the saved passthrough mode (green border = interactive, grey = passthrough). Press **ESC** on an interactive magnifier to close it. |
+| **Passthrough: ligado / desligado** | Turns click-through on/off: the border turns grey and mouse clicks go to the game underneath. The button shows the current mode, which is saved and used the next time the magnifier opens. It only switches the mode — it doesn't open the magnifier. |
 | **Fechar Lupa** | Closes the magnifier — the only way to close it while it is in passthrough mode. |
-| **Zoom / Posição X / Posição Y / FPS** | Magnification (0.5×–5×), window position and refresh rate (5–60 FPS). Changes apply to the open magnifier immediately. |
-| **💾 Salvar Configurações** | Saves zoom, position and FPS. The selected area is saved automatically. |
+| **Zoom / Posição X / Posição Y / FPS** | Magnification (0.5×–5×), window position and refresh rate (5–60 FPS). Changes apply to the open magnifier immediately and are saved automatically. |
 | **❌ Sair** (or closing the window) | Closes the app and the magnifier. |
 
 The magnifier keeps running while the control panel is minimized.
 
-Settings are stored in `%APPDATA%\area_selector\config.json`.
+Settings are saved automatically (half a second after you stop moving a slider, and when the app closes) to `%APPDATA%\area_selector\config.json`.
 
 ---
 
@@ -185,7 +184,7 @@ If running from inside the WSL filesystem is slow, copy `area_selector.exe` to t
 
 ### 🟥 Problem — Persisting User Configuration  
 Keeping area, zoom and position across sessions required a clean persistent solution integrated into user directories.  
-**Solution:** implemented `AppConfig` using `serde_json` and stored it under the OS config path. New settings (like FPS) have defaults, so older config files keep working.
+**Solution:** implemented `AppConfig` using `serde_json` and stored it under the OS config path. Changes are auto-saved with a short debounce (so dragging a slider doesn't write the file every frame) and on exit, so there is no save button. New settings (like FPS) have defaults, so older config files keep working.
 
 ### 🟩 Problem — Click-Through Mode  
 Switching between interactive and passthrough modes originally required editing the window's extended styles (`WS_EX_TRANSPARENT`) through a window handle saved to a file, then restarting the magnifier.  
@@ -220,7 +219,6 @@ Mouse positions are in logical points while screen capture uses physical pixels,
 - **Primary monitor only.** The area selector covers the primary monitor.
 - **Selector background is a still screenshot** taken when you click *Selecionar Área* (secondary windows can't be transparent with eframe 0.26 on Windows), so animations behind it are frozen while you select.
 - **The magnifier doesn't appear in screen recordings or streams** (OBS, Discord), a side effect of excluding it from capture.
-- **Slider changes are saved only with *Salvar Configurações*** (or when the magnifier is started); the selected area is saved automatically.
 - **Areas saved by older versions on scaled displays** may point to the wrong region — select the area again once.
 
 ---

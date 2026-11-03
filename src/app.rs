@@ -1,4 +1,4 @@
-use area_selector::config::{self, AppConfig, LUPA_FPS_RANGE};
+use area_selector::config::{self, AppConfig, AutoSave, AutoSaveAction, LUPA_FPS_RANGE};
 use area_selector::lupa::{LupaApp, LupaOutcome};
 use area_selector::model::Area;
 use area_selector::ui_selector::{self, AreaSelector, SelectorOutcome};
@@ -45,6 +45,8 @@ pub struct App {
     /// updating while the panel is minimized (an immediate viewport would freeze).
     lupa: Option<SharedLupa>,
     status: Option<Status>,
+    /// Settings are saved automatically shortly after they stop changing.
+    autosave: AutoSave,
 }
 
 impl App {
@@ -52,6 +54,7 @@ impl App {
         let config = config::load_config();
         Self {
             saved_area: config.area,
+            autosave: AutoSave::new(&config),
             config,
             selector: None,
             lupa: None,
@@ -86,34 +89,46 @@ impl App {
         });
     }
 
-    /// Opens (or reopens) the magnifier on the saved area.
-    fn open_lupa(&mut self, ctx: &egui::Context, passthrough: bool) {
+    /// Writes the settings now and reports the result in the panel.
+    fn save_now(&mut self, success: Option<&str>) {
+        let result = config::save_config(&self.config);
+        // Also on error: retrying every frame would only repeat the same error.
+        // The next change triggers a new attempt.
+        self.autosave.mark_saved(&self.config);
+        self.report_save(result, success);
+    }
+
+    /// Saves pending slider changes once they have been stable for a moment.
+    fn autosave(&mut self, ctx: &egui::Context) {
+        match self.autosave.poll(&self.config, Instant::now()) {
+            AutoSaveAction::Idle => {}
+            AutoSaveAction::Wait(remaining) => ctx.request_repaint_after(remaining),
+            AutoSaveAction::SaveNow => self.save_now(Some("✔️ Configurações salvas")),
+        }
+    }
+
+    /// Opens (or reopens) the magnifier on the saved area, in the saved passthrough mode.
+    fn open_lupa(&mut self, ctx: &egui::Context) {
         let Some(area) = self.saved_area else {
             return;
         };
         // The old lupa.exe persisted its position on launch; keep settings in sync on disk.
-        let saved = config::save_config(&self.config);
-        self.report_save(saved, None);
+        self.save_now(None);
         let mut app = LupaApp::new(
             area.to_rect_px(),
             self.config.lupa_zoom,
             self.lupa_position(),
-            passthrough,
+            self.config.lupa_passthrough,
             ctx.pixels_per_point(),
         );
         app.frame_interval = self.config.lupa_frame_interval();
         self.lupa = Some(Arc::new(Mutex::new(LupaState { app, closed: false })));
     }
 
-    /// Flips click-through on the open magnifier, or opens it in passthrough mode.
-    fn toggle_passthrough(&mut self, ctx: &egui::Context) {
-        match &self.lupa {
-            Some(lupa) => {
-                let mut state = lock(lupa);
-                state.app.passthrough = !state.app.passthrough;
-            }
-            None => self.open_lupa(ctx, true),
-        }
+    /// Flips the saved click-through mode (auto-saved like the sliders). An open
+    /// magnifier follows it on the next frame; otherwise it applies on the next open.
+    fn toggle_passthrough(&mut self) {
+        self.config.lupa_passthrough = !self.config.lupa_passthrough;
     }
 
     fn show_selector(&mut self, ctx: &egui::Context) {
@@ -127,10 +142,9 @@ impl App {
         match outcome {
             SelectorOutcome::Pending => {}
             SelectorOutcome::Selected(area) => {
-                let saved = config::save_area(&area);
-                self.report_save(saved, Some("✔️ Área salva!"));
                 self.saved_area = Some(area);
                 self.config.area = Some(area);
+                self.save_now(Some("✔️ Área salva!"));
                 self.selector = None;
             }
             SelectorOutcome::Cancelled => self.selector = None,
@@ -147,6 +161,7 @@ impl App {
     fn show_lupa(&mut self, ctx: &egui::Context) {
         let position = self.lupa_position();
         let zoom = self.config.lupa_zoom;
+        let passthrough = self.config.lupa_passthrough;
         let frame_interval = self.config.lupa_frame_interval();
         let Some(lupa) = &self.lupa else {
             return;
@@ -157,6 +172,7 @@ impl App {
             // Live updates: slider changes apply to the open magnifier immediately.
             state.app.zoom = zoom;
             state.app.position = position;
+            state.app.passthrough = passthrough;
             state.app.frame_interval = frame_interval;
             state.app.viewport_builder()
         };
@@ -212,11 +228,20 @@ impl App {
                         .add_enabled(self.saved_area.is_some(), Button::new("Iniciar Lupa"))
                         .clicked()
                     {
-                        self.open_lupa(ctx, false);
+                        self.open_lupa(ctx);
                     }
 
-                    if ui.button("Alternar Lupa Passthrough").clicked() {
-                        self.toggle_passthrough(ctx);
+                    let passthrough_label = if self.config.lupa_passthrough {
+                        "Passthrough: ligado"
+                    } else {
+                        "Passthrough: desligado"
+                    };
+                    if ui
+                        .button(passthrough_label)
+                        .on_hover_text("Alternar Lupa Passthrough: cliques atravessam a lupa")
+                        .clicked()
+                    {
+                        self.toggle_passthrough();
                     }
 
                     // A passthrough magnifier can't receive clicks or ESC, so it is closed from here.
@@ -236,10 +261,7 @@ impl App {
                 ui.add(Slider::new(&mut self.config.lupa_pos_y, 0.0..=screen.y).text("Posição Y"));
                 ui.add(Slider::new(&mut self.config.lupa_fps, LUPA_FPS_RANGE).text("FPS"));
 
-                if ui.button("💾 Salvar Configurações").clicked() {
-                    let saved = config::save_config(&self.config);
-                    self.report_save(saved, Some("✔️ Configurações salvas!"));
-                }
+                ui.weak("As configurações são salvas automaticamente.");
 
                 ui.separator();
 
@@ -271,5 +293,15 @@ impl eframe::App for App {
         self.panel_ui(ctx);
         self.show_selector(ctx);
         self.show_lupa(ctx);
+        self.autosave(ctx);
+    }
+
+    /// Saves a change made less than [`config::AUTOSAVE_DELAY`] before closing.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if self.autosave.has_unsaved_changes(&self.config) {
+            if let Err(err) = config::save_config(&self.config) {
+                log::error!("could not save config on exit: {err}");
+            }
+        }
     }
 }
