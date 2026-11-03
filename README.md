@@ -217,7 +217,7 @@ Mouse positions are in logical points while screen capture uses physical pixels,
 ## 🐛 Known Bugs / Limitations
 
 - **Primary monitor only.** The area selector covers the primary monitor.
-- **Selector background is a still screenshot** taken when you click *Selecionar Área* (secondary windows can't be transparent with eframe 0.26 on Windows), so animations behind it are frozen while you select.
+- **Selector background is a still screenshot** taken when you click *Selecionar Área* (secondary windows weren't see-through with eframe's glow renderer on Windows), so animations behind it are frozen while you select.
 - **The magnifier doesn't appear in screen recordings or streams** (OBS, Discord), a side effect of excluding it from capture.
 - **Areas saved by older versions on scaled displays** may point to the wrong region — select the area again once.
 

@@ -1,7 +1,6 @@
 //! Screen capture with Win32 GDI (`BitBlt` from the desktop DC).
 
 use eframe::egui::{Color32, ColorImage};
-use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::*;
 
 /// Reusable capturer for a fixed-size region. The memory DC, bitmap and pixel buffer
@@ -22,7 +21,7 @@ impl ScreenCapture {
         }
         unsafe {
             let screen = ScreenDc::get()?;
-            let mem_dc = CreateCompatibleDC(screen.0);
+            let mem_dc = CreateCompatibleDC(Some(screen.0));
             if mem_dc.is_invalid() {
                 return None;
             }
@@ -31,7 +30,7 @@ impl ScreenCapture {
                 let _ = DeleteDC(mem_dc);
                 return None;
             }
-            let previous = SelectObject(mem_dc, bitmap);
+            let previous = SelectObject(mem_dc, bitmap.into());
             Some(Self {
                 width,
                 height,
@@ -52,7 +51,7 @@ impl ScreenCapture {
         unsafe {
             let screen = ScreenDc::get()?;
             let (w, h) = (self.width as i32, self.height as i32);
-            BitBlt(self.mem_dc, 0, 0, w, h, screen.0, x, y, SRCCOPY).ok()?;
+            BitBlt(self.mem_dc, 0, 0, w, h, Some(screen.0), x, y, SRCCOPY).ok()?;
 
             let mut info = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
@@ -79,10 +78,10 @@ impl ScreenCapture {
                 return None;
             }
         }
-        Some(ColorImage {
-            size: [self.width as usize, self.height as usize],
-            pixels: bgra_to_color32(&self.bgra),
-        })
+        Some(ColorImage::new(
+            [self.width as usize, self.height as usize],
+            bgra_to_color32(&self.bgra),
+        ))
     }
 }
 
@@ -96,7 +95,7 @@ impl Drop for ScreenCapture {
     fn drop(&mut self) {
         unsafe {
             SelectObject(self.mem_dc, self.previous);
-            let _ = DeleteObject(self.bitmap);
+            let _ = DeleteObject(self.bitmap.into());
             let _ = DeleteDC(self.mem_dc);
         }
     }
@@ -108,7 +107,7 @@ struct ScreenDc(HDC);
 
 impl ScreenDc {
     unsafe fn get() -> Option<Self> {
-        let dc = GetDC(HWND::default());
+        let dc = GetDC(None);
         (!dc.is_invalid()).then_some(Self(dc))
     }
 }
@@ -116,7 +115,7 @@ impl ScreenDc {
 impl Drop for ScreenDc {
     fn drop(&mut self) {
         unsafe {
-            ReleaseDC(HWND::default(), self.0);
+            ReleaseDC(None, self.0);
         }
     }
 }

@@ -35,7 +35,7 @@ fn main() {
     }
 }
 
-fn run_panel() -> eframe::Result<()> {
+fn run_panel() -> eframe::Result {
     let mut viewport = ViewportBuilder::default();
     if let Some(icon) = icon::app_icon() {
         viewport = viewport.with_icon(icon);
@@ -52,17 +52,18 @@ fn run_panel() -> eframe::Result<()> {
     eframe::run_native(
         "Selecionador de Área",
         options,
-        Box::new(|_cc| Box::new(App::new())),
+        Box::new(|_cc| Ok(Box::new(App::new()))),
     )
 }
 
 /// `area_selector seletor`: only the fullscreen selector; saves the area and exits.
-fn run_selector() -> eframe::Result<()> {
+fn run_selector() -> eframe::Result {
     struct SelectorRoot(AreaSelector);
 
     impl eframe::App for SelectorRoot {
-        fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-            match self.0.ui(ctx) {
+        fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+            let ctx = &ui.ctx().clone();
+            match self.0.ui(ui) {
                 SelectorOutcome::Pending => {}
                 SelectorOutcome::Selected(area) => {
                     match config::save_area(&area) {
@@ -85,18 +86,18 @@ fn run_selector() -> eframe::Result<()> {
     eframe::run_native(
         AreaSelector::TITLE,
         options,
-        Box::new(|_cc| Box::new(SelectorRoot(selector))),
+        Box::new(|_cc| Ok(Box::new(SelectorRoot(selector)))),
     )
 }
 
 /// `area_selector lupa ...`: only the magnifier window.
-fn run_lupa(args: LupaArgs) -> eframe::Result<()> {
+fn run_lupa(args: LupaArgs) -> eframe::Result {
     struct LupaRoot(LupaApp);
 
     impl eframe::App for LupaRoot {
-        fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-            if self.0.ui(ctx) == LupaOutcome::Closed {
-                ctx.send_viewport_cmd(ViewportCommand::Close);
+        fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+            if self.0.ui(ui) == LupaOutcome::Closed {
+                ui.ctx().send_viewport_cmd(ViewportCommand::Close);
             }
         }
     }
@@ -126,7 +127,7 @@ fn run_lupa(args: LupaArgs) -> eframe::Result<()> {
     eframe::run_native(
         LupaApp::TITLE,
         options,
-        Box::new(move |_cc| Box::new(LupaRoot(lupa))),
+        Box::new(move |_cc| Ok(Box::new(LupaRoot(lupa)))),
     )
 }
 

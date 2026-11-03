@@ -5,7 +5,7 @@
 
 use image::codecs::ico::{IcoEncoder, IcoFrame};
 use image::imageops::FilterType;
-use image::ColorType;
+use image::ExtendedColorType;
 use std::{env, fs, path::Path, path::PathBuf};
 
 const ICON_SIZES: [u32; 6] = [256, 64, 48, 32, 24, 16];
@@ -43,7 +43,8 @@ fn write_ico(png_path: &Path, ico_path: &Path) {
     let frames: Vec<IcoFrame> = encoded
         .iter()
         .map(|(rgba, size)| {
-            IcoFrame::as_png(rgba, *size, *size, ColorType::Rgba8).expect("encode icon frame")
+            IcoFrame::as_png(rgba, *size, *size, ExtendedColorType::Rgba8)
+                .expect("encode icon frame")
         })
         .collect();
 

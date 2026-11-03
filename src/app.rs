@@ -137,7 +137,7 @@ impl App {
         };
         let builder = AreaSelector::viewport_builder(ui_selector::screen_size(ctx));
         let outcome =
-            ctx.show_viewport_immediate(selector_viewport_id(), builder, |ctx, _| selector.ui(ctx));
+            ctx.show_viewport_immediate(selector_viewport_id(), builder, |ui, _| selector.ui(ui));
 
         match outcome {
             SelectorOutcome::Pending => {}
@@ -178,15 +178,15 @@ impl App {
         };
 
         let shared = Arc::clone(lupa);
-        ctx.show_viewport_deferred(lupa_viewport_id(), builder, move |ctx, _| {
+        ctx.show_viewport_deferred(lupa_viewport_id(), builder, move |ui, _| {
             let mut state = lock(&shared);
             if state.closed {
                 return; // hidden, waiting for the panel to drop it; stop capturing
             }
-            if state.app.ui(ctx) == LupaOutcome::Closed {
+            if state.app.ui(ui) == LupaOutcome::Closed {
                 state.closed = true;
-                ctx.send_viewport_cmd(ViewportCommand::Visible(false));
-                ctx.request_repaint_of(ViewportId::ROOT);
+                ui.ctx().send_viewport_cmd(ViewportCommand::Visible(false));
+                ui.ctx().request_repaint_of(ViewportId::ROOT);
             }
         });
     }
@@ -209,10 +209,11 @@ impl App {
         ui.ctx().request_repaint_after(status.until - now);
     }
 
-    fn panel_ui(&mut self, ctx: &egui::Context) {
+    fn panel_ui(&mut self, ui: &mut Ui) {
+        let ctx = &ui.ctx().clone();
         let screen = ui_selector::screen_size(ctx);
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.heading("🖥️ Área Selector");
 
@@ -288,9 +289,10 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        let ctx = &ui.ctx().clone();
         self.reap_closed_lupa();
-        self.panel_ui(ctx);
+        self.panel_ui(ui);
         self.show_selector(ctx);
         self.show_lupa(ctx);
         self.autosave(ctx);

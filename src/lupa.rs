@@ -101,7 +101,8 @@ impl LupaApp {
     }
 
     /// Captures the area, draws it zoomed, and reports whether the window should close.
-    pub fn ui(&mut self, ctx: &egui::Context) -> LupaOutcome {
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> LupaOutcome {
+        let ctx = &ui.ctx().clone();
         self.pixels_per_point = ctx.pixels_per_point();
         if !self.excluded_from_capture {
             self.excluded_from_capture = exclude_own_window_from_capture(Self::TITLE);
@@ -110,8 +111,8 @@ impl LupaApp {
 
         let display_size = self.display_size();
         egui::CentralPanel::default()
-            .frame(Frame::none())
-            .show(ctx, |ui| {
+            .frame(Frame::NONE)
+            .show(ui, |ui| {
                 let rect = ui.max_rect();
                 let painter = ui.painter_at(rect);
 
@@ -128,8 +129,9 @@ impl LupaApp {
                 };
                 painter.rect_stroke(
                     rect,
-                    egui::Rounding::ZERO,
+                    egui::CornerRadius::ZERO,
                     egui::Stroke::new(3.0_f32, color),
+                    egui::StrokeKind::Middle,
                 );
             });
 
@@ -149,7 +151,8 @@ impl LupaApp {
 /// searched — the built-in Windows Magnifier is also called "Lupa" in Portuguese.
 /// Returns true once the window was found and updated.
 fn exclude_own_window_from_capture(title: &str) -> bool {
-    use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{HWND, LPARAM};
     use windows::Win32::System::Threading::GetCurrentProcessId;
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowTextW, GetWindowThreadProcessId, SetWindowDisplayAffinity,
