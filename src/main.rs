@@ -46,7 +46,7 @@ fn run_panel() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport: viewport
-            .with_inner_size([600.0, 720.0])
+            .with_inner_size([560.0, 680.0])
             .with_min_inner_size([320.0, 400.0])
             .with_resizable(true)
             .with_decorations(true)

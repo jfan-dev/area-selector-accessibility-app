@@ -1,9 +1,12 @@
-//! Control panel UI: header with status chips, Home and Appearance tabs, footer.
+//! Control panel UI: header (icon, title, subtitle, help, status chips), the Home /
+//! Hotkeys / Appearance tabs, dialogs and the footer.
 //!
-//! Layout rules for large text sizes: captions go above their control, sliders fill
-//! the available width, and rows that may not fit use wrapping layouts.
+//! Layout: about 16 px outer padding, cards with about 14 px padding and 12 px between
+//! sections. On wide windows related cards sit side by side; on narrow ones everything
+//! stacks, captions go above their control and sliders move their value into the
+//! caption when needed (checked by the headless layout tests in `app.rs`).
 //! Accessibility: every card and choice is a named group in the accessibility tree,
-//! and symbol-only buttons have spoken names.
+//! and symbol-only buttons have spoken names. Colours come from the theme palette.
 
 use super::{App, Tab};
 use area_selector::config::{
@@ -12,18 +15,29 @@ use area_selector::config::{
 use area_selector::hotkeys::{self, Action, BindingError};
 use area_selector::i18n::{Lang, Strings};
 use area_selector::lupa::{self, Placement};
-use area_selector::theme;
+use area_selector::theme::{self, TITLE_SCALE};
 use area_selector::ui_selector;
 use area_selector::widgets::{
-    a11y_group, button_width, caption, card, chip_button, fit_slider_width, icon_button, icon_pad,
-    radio_width, row_or_column, slider_value_fits, slider_with_caption, swatch, swatch_width,
-    text_width, toggle_switch,
+    a11y_group, button_width, caption, card, card_sized, chip_button, equal_height_row,
+    fit_slider_width, icon_button, icon_pad, info_box, key_field, primary_button, radio_width,
+    remove_button, row_or_column, section_gap, set_equal_height_row, slider_value_fits,
+    slider_with_caption, swatch, swatch_width, text_width, themed_slider, toggle_switch,
 };
 use eframe::egui::*;
 use std::time::Instant;
 
 const ZOOM_STEP: f32 = 0.25;
 const UI_SCALE_STEP: f32 = 0.1;
+
+/// Body font size of the current style (grows with the text-size setting).
+fn body_size(ui: &Ui) -> f32 {
+    TextStyle::Body.resolve(ui.style()).size
+}
+
+/// Wide enough for two cards side by side (about 600 px at 100 % text size).
+fn two_columns_fit(ui: &Ui) -> bool {
+    ui.available_width() >= 38.0 * body_size(ui)
+}
 
 impl App {
     pub(super) fn panel_ui(&mut self, ui: &mut Ui) {
@@ -32,32 +46,28 @@ impl App {
         {
             self.layout_overflow = 0.0;
         }
+        let padding = (body_size(ui)) as i8; // about 16 px
+        let frame = Frame::central_panel(ui.style()).inner_margin(Margin::same(padding));
 
-        Panel::bottom("footer").show(ui, |ui| {
-            ui.add_space(4.0);
-            self.footer(ui, s);
-            ui.add_space(4.0);
-        });
+        Panel::bottom("footer")
+            .frame(frame.inner_margin(Margin::symmetric(padding, padding / 2)))
+            .show(ui, |ui| self.footer(ui, s));
 
         let ctx = ui.ctx().clone();
         self.tray_notice_ui(&ctx, s);
         self.onboarding_ui(&ctx, s);
 
-        CentralPanel::default().show(ui, |ui| {
-            self.header(ui, s);
-            let tabs_width = button_width(ui, s.tab_home)
-                + button_width(ui, s.tab_hotkeys)
-                + button_width(ui, s.tab_appearance);
-            row_or_column(ui, tabs_width, |ui| {
-                ui.selectable_value(&mut self.tab, Tab::Home, s.tab_home);
-                ui.selectable_value(&mut self.tab, Tab::Hotkeys, s.tab_hotkeys);
-                ui.selectable_value(&mut self.tab, Tab::Appearance, s.tab_appearance);
-            });
-            if self.tab != Tab::Hotkeys {
-                self.recording = None;
+        CentralPanel::default().frame(frame).show(ui, |ui| {
+            // Short windows (for the current text size) scroll the header with the
+            // content, so the content keeps most of the height.
+            let header_scrolls = ui.available_height() < 32.0 * body_size(ui);
+            if !header_scrolls {
+                self.header_and_tabs(ui, s);
             }
-            ui.separator();
             ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                if header_scrolls {
+                    self.header_and_tabs(ui, s);
+                }
                 match self.tab {
                     Tab::Home => self.home_tab(ui, s),
                     Tab::Hotkeys => self.hotkeys_tab(ui, s),
@@ -73,11 +83,34 @@ impl App {
             });
             #[cfg(test)]
             {
-                // Visible area = clip rect (max_rect grows with oversized content).
                 let over = ui.min_rect().right() - ui.clip_rect().right();
                 self.layout_overflow = self.layout_overflow.max(over);
             }
         });
+    }
+
+    fn header_and_tabs(&mut self, ui: &mut Ui, s: &'static Strings) {
+        self.header(ui, s);
+        ui.add_space(section_gap(ui) * 0.5);
+        // Tab labels lose their icon when the row is too narrow (compact labels first),
+        // then wrap onto more rows.
+        let full = [s.tab_home, s.tab_hotkeys, s.tab_appearance];
+        let compact = full.map(|label| label.split_once(' ').map_or(label, |(_, t)| t));
+        let width = |labels: &[&str; 3]| labels.iter().map(|l| button_width(ui, l)).sum::<f32>();
+        let labels = if width(&full) <= ui.available_width() {
+            full
+        } else {
+            compact
+        };
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.tab, Tab::Home, labels[0]);
+            ui.selectable_value(&mut self.tab, Tab::Hotkeys, labels[1]);
+            ui.selectable_value(&mut self.tab, Tab::Appearance, labels[2]);
+        });
+        if self.tab != Tab::Hotkeys {
+            self.recording = None;
+        }
+        ui.separator();
     }
 
     /// egui moves keyboard focus with Tab but doesn't scroll to it; do that here so the
@@ -93,20 +126,43 @@ impl App {
         }
     }
 
-    /// Title and status chips. Each chip is also a shortcut for its feature.
+    /// App icon, title, subtitle and help button, then the status chips (which are also
+    /// shortcuts for their feature).
     fn header(&mut self, ui: &mut Ui, s: &'static Strings) {
-        // Title with a "?" button that reopens the first-run guide.
-        let button = ui.spacing().interact_size.y + ui.spacing().item_spacing.x;
-        let needed = text_width(ui, s.app_title, TextStyle::Heading) + button;
+        let title_size = body_size(ui) * TITLE_SCALE;
+        let icon_size = title_size * 1.6;
+        let help_size = ui.spacing().interact_size.y + ui.spacing().item_spacing.x;
+        let title_width = text_width(ui, s.app_title, TextStyle::Body) * TITLE_SCALE;
+        let subtitle_width = text_width(ui, s.app_subtitle, TextStyle::Small);
+        let spacing = ui.spacing().item_spacing.x;
+        let text_block = title_width.max(subtitle_width);
+        // Narrow windows drop the decorative icon first, then stack.
+        let with_icon = icon_size + spacing + text_block + help_size + spacing;
+        let show_icon = with_icon <= ui.available_width();
+        let needed = if show_icon {
+            with_icon
+        } else {
+            text_block + help_size + spacing
+        };
+
+        let icon = self.icon_texture(ui.ctx()).filter(|_| show_icon);
         let mut help = false;
         row_or_column(ui, needed, |ui| {
-            ui.heading(s.app_title);
+            if let Some(icon) = icon {
+                ui.add(Image::new((icon.id(), vec2(icon_size, icon_size))));
+            }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.label(RichText::new(s.app_title).size(title_size).strong());
+                ui.label(RichText::new(s.app_subtitle).small().weak());
+            });
             help = icon_button(ui, true, "?", s.help_tip).clicked();
         });
         if help {
             self.show_onboarding = true;
             self.onboarding_step = 0;
         }
+
         let has_area = self.saved_area.is_some();
         let lupa_open = self.lupa.is_some();
         let passthrough = self.config.lupa_passthrough;
@@ -127,10 +183,10 @@ impl App {
         } else {
             s.chip_passthrough_off
         };
-
         let area_tip = self.with_hotkey(s.chip_area_tip, Action::SelectArea);
         let lupa_tip = self.with_hotkey(lupa_tip, Action::ToggleLupa);
         let passthrough_tip = self.with_hotkey(s.chip_passthrough_tip, Action::TogglePassthrough);
+
         let (mut select_area, mut toggle_lupa, mut toggle_passthrough) = (false, false, false);
         a11y_group(ui, Role::Group, s.status_group, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -148,27 +204,75 @@ impl App {
             self.open_selector();
         }
         if toggle_lupa {
-            if lupa_open {
-                self.close_lupa();
-            } else {
-                let ctx = ui.ctx().clone();
-                self.open_lupa(&ctx);
-            }
+            self.toggle_lupa(ui.ctx());
         }
         if toggle_passthrough {
             self.config.lupa_passthrough = !passthrough;
         }
     }
 
+    fn toggle_lupa(&mut self, ctx: &Context) {
+        if self.lupa.is_some() {
+            self.close_lupa();
+        } else {
+            let ctx = ctx.clone();
+            self.open_lupa(&ctx);
+        }
+    }
+
     fn home_tab(&mut self, ui: &mut Ui, s: &'static Strings) {
-        card(ui, s.card_area, |ui| {
-            if ui
-                .button(s.select_area)
-                .on_hover_text(self.with_hotkey(s.select_area_tip, Action::SelectArea))
-                .clicked()
+        let gap = section_gap(ui);
+        if two_columns_fit(ui) {
+            // Side by side: both cards share the taller card's height.
+            let row = Id::unique("home_cards_row");
+            let height = equal_height_row(ui, row);
+            let top = ui.cursor().min.y;
+            let tallest = ui.columns(2, |columns| {
+                let a = self.area_card(&mut columns[0], s, height);
+                let b = self.lupa_card(&mut columns[1], s, height);
+                a.max(b)
+            });
+            set_equal_height_row(ui, row, tallest);
+            #[cfg(test)]
             {
-                self.open_selector();
+                self.card_row = (
+                    ui.cursor().min.y - top - ui.spacing().item_spacing.y,
+                    height,
+                );
             }
+            let _ = top;
+        } else {
+            self.area_card(ui, s, 0.0);
+            ui.add_space(gap);
+            self.lupa_card(ui, s, 0.0);
+        }
+
+        ui.add_space(gap);
+        card(ui, s.card_view, |ui| {
+            self.zoom_controls(ui, s);
+            ui.add_space(ui.spacing().item_spacing.y * 0.5);
+            let value = format!("{} fps", self.config.lupa_fps);
+            let fps = Slider::new(&mut self.config.lupa_fps, LUPA_FPS_RANGE).suffix(" fps");
+            slider_with_caption(ui, s.fps, &value, "60 fps", fps).on_hover_text(s.fps_tip);
+        });
+
+        ui.add_space(gap);
+        card(ui, s.position, |ui| {
+            if two_columns_fit(ui) {
+                ui.columns(2, |columns| {
+                    self.position_pad(&mut columns[0], s);
+                    self.advanced_position(&mut columns[1], s);
+                });
+            } else {
+                self.position_pad(ui, s);
+                self.advanced_position(ui, s);
+            }
+        });
+    }
+
+    /// Returns the card's natural height (for equal heights side by side).
+    fn area_card(&mut self, ui: &mut Ui, s: &'static Strings, min_height: f32) -> f32 {
+        card_sized(ui, s.card_area, min_height, |ui| {
             match self.saved_area {
                 Some(area) => {
                     let (x, y, w, h) = area.to_rect_px();
@@ -178,27 +282,32 @@ impl App {
                     ui.weak(s.no_area_hint);
                 }
             }
-        });
+            let tip = self.with_hotkey(s.select_area_tip, Action::SelectArea);
+            if primary_button(ui, true, s.select_area)
+                .on_hover_text(tip)
+                .clicked()
+            {
+                self.open_selector();
+            }
+        })
+        .1
+    }
 
-        ui.add_space(8.0);
-        card(ui, s.card_lupa, |ui| {
-            if self.lupa.is_some() {
-                if ui
-                    .button(s.close_lupa)
-                    .on_hover_text(self.with_hotkey(s.close_lupa_tip, Action::ToggleLupa))
-                    .clicked()
-                {
-                    self.close_lupa();
-                }
+    /// Returns the card's natural height (for equal heights side by side).
+    fn lupa_card(&mut self, ui: &mut Ui, s: &'static Strings, min_height: f32) -> f32 {
+        card_sized(ui, s.card_lupa, min_height, |ui| {
+            let open = self.lupa.is_some();
+            let (label, tip) = if open {
+                (s.close_lupa, s.close_lupa_tip)
             } else {
-                let open = ui
-                    .add_enabled(self.saved_area.is_some(), Button::new(s.open_lupa))
-                    .on_hover_text(self.with_hotkey(s.open_lupa_tip, Action::ToggleLupa))
-                    .on_disabled_hover_text(s.open_lupa_needs_area_tip);
-                if open.clicked() {
-                    let ctx = ui.ctx().clone();
-                    self.open_lupa(&ctx);
-                }
+                (s.open_lupa, s.open_lupa_tip)
+            };
+            let tip = self.with_hotkey(tip, Action::ToggleLupa);
+            let button = primary_button(ui, open || self.saved_area.is_some(), label)
+                .on_hover_text(tip)
+                .on_disabled_hover_text(s.open_lupa_needs_area_tip);
+            if button.clicked() {
+                self.toggle_lupa(ui.ctx());
             }
 
             let passthrough_tip = self.with_hotkey(s.passthrough_tip, Action::TogglePassthrough);
@@ -210,21 +319,8 @@ impl App {
                 s.off,
             )
             .on_hover_text(passthrough_tip);
-
-            ui.add_space(4.0);
-            self.zoom_controls(ui, s);
-
-            let value = format!("{} fps", self.config.lupa_fps);
-            let fps = Slider::new(&mut self.config.lupa_fps, LUPA_FPS_RANGE).suffix(" fps");
-            slider_with_caption(ui, s.fps, &value, "60 fps", fps).on_hover_text(s.fps_tip);
-
-            ui.add_space(4.0);
-            self.position_controls(ui, s);
-            ui.weak(s.lupa_drag_tip);
-        });
-
-        ui.add_space(4.0);
-        ui.weak(s.autosave_note);
+        })
+        .1
     }
 
     fn zoom_controls(&mut self, ui: &mut Ui, s: &'static Strings) {
@@ -256,7 +352,7 @@ impl App {
             ui.horizontal(|ui| {
                 minus(ui, zoom);
                 fit_slider_width(ui, button, sample);
-                ui.add(slider(zoom)).labelled_by(label.id);
+                themed_slider(ui, slider(zoom)).labelled_by(label.id);
                 plus(ui, zoom);
             });
         } else {
@@ -269,12 +365,10 @@ impl App {
         }
     }
 
-    fn position_controls(&mut self, ui: &mut Ui, s: &'static Strings) {
+    /// The five-button positioning pad (corners and centre).
+    fn position_pad(&mut self, ui: &mut Ui, s: &'static Strings) {
         let ctx = ui.ctx().clone();
         let screen = ui_selector::screen_size(&ctx);
-        caption(ui, s.position);
-
-        // A 3×3 positioning pad: compact at any text size, and each button is named.
         let pad = [
             [
                 Some((Placement::TopLeft, "↖", s.preset_top_left)),
@@ -293,7 +387,7 @@ impl App {
         // always fits the width.
         let gap = ui.spacing().item_spacing.x * 0.5;
         let size = ((ui.available_width() - 2.0 * gap) / 3.0)
-            .min(ui.spacing().interact_size.y * 1.3)
+            .min(ui.spacing().interact_size.y * 1.2)
             .max(24.0);
         let cells = pad.map(|row| row.map(|cell| cell.map(|(_, icon, name)| (icon, name))));
         let clicked = a11y_group(ui, Role::Group, s.position, |ui| {
@@ -304,7 +398,11 @@ impl App {
                 self.place_lupa(&ctx, placement, screen);
             }
         }
+    }
 
+    /// Collapsed by default: exact X/Y and the drag/zoom tip.
+    fn advanced_position(&mut self, ui: &mut Ui, s: &'static Strings) {
+        let screen = ui_selector::screen_size(ui.ctx());
         CollapsingHeader::new(s.advanced)
             .id_salt("advanced_position")
             .show(ui, |ui| {
@@ -324,6 +422,7 @@ impl App {
                     )
                     .labelled_by(y.id);
                 });
+                info_box(ui, s.lupa_drag_tip);
             });
     }
 
@@ -349,49 +448,117 @@ impl App {
         }
     }
 
+    /// Text shown in the shortcut field while recording: the modifiers held right now.
+    fn recording_preview(ui: &Ui) -> String {
+        let modifiers = ui.ctx().input(|i| i.modifiers);
+        let mut parts = Vec::new();
+        if modifiers.ctrl {
+            parts.push("Ctrl");
+        }
+        if modifiers.alt {
+            parts.push("Alt");
+        }
+        if modifiers.shift {
+            parts.push("Shift");
+        }
+        parts.push("…");
+        parts.join("+")
+    }
+
     fn hotkeys_tab(&mut self, ui: &mut Ui, s: &'static Strings) {
         self.record_hotkey(ui);
         card(ui, s.card_hotkeys, |ui| {
-            ui.weak(s.hotkeys_note);
+            info_box(ui, s.hotkeys_note);
+            ui.add_space(ui.spacing().item_spacing.y * 0.5);
+
+            // Column widths shared by all rows, so they line up.
+            let spacing = ui.spacing().item_spacing.x;
+            let name_width = Action::ALL
+                .iter()
+                .map(|&a| text_width(ui, s.action_name(a), TextStyle::Body))
+                .fold(0.0, f32::max);
+            let key_width = Action::ALL
+                .iter()
+                .filter_map(|&a| self.hotkey_label(a))
+                .chain(["Ctrl+Alt+PageDown".to_owned()])
+                .map(|label| text_width(ui, &label, TextStyle::Monospace))
+                .fold(0.0, f32::max);
+            let controls_width = key_width
+                + 20.0
+                + button_width(ui, s.hotkey_change)
+                + button_width(ui, s.hotkey_clear)
+                + 2.0 * spacing;
+            let aligned = name_width + spacing + controls_width <= ui.available_width();
+            // Stacked rows (name above) still share the field width when it fits.
+            let fixed_key_width = controls_width <= ui.available_width();
+
             for action in Action::ALL {
-                ui.separator();
                 let name = s.action_name(action);
+                let recording = self.recording == Some(action);
+                let shortcut = if recording {
+                    Self::recording_preview(ui)
+                } else {
+                    self.hotkey_label(action)
+                        .unwrap_or_else(|| s.hotkey_none.to_owned())
+                };
                 a11y_group(ui, Role::Group, name, |ui| {
-                    caption(ui, name);
-                    let recording = self.recording == Some(action);
-                    if recording {
-                        let color = ui.visuals().selection.bg_fill;
-                        ui.label(RichText::new(s.hotkey_recording).color(color).strong());
+                    let row = |ui: &mut Ui, this: &mut Self| {
+                        // Same field width on every row when it fits; otherwise it wraps.
+                        let min_width = if fixed_key_width { key_width } else { 0.0 };
+                        key_field(ui, &shortcut, recording, min_width);
+                        let change = ui.add(Button::new(s.hotkey_change).selected(recording));
+                        if change.clicked() {
+                            this.recording = if recording { None } else { Some(action) };
+                            this.recording_invalid = false;
+                        }
+                        let has_binding = this.hotkey_label(action).is_some();
+                        if remove_button(ui, has_binding, s.hotkey_clear).clicked() {
+                            this.config.hotkeys.insert(action, String::new());
+                            this.recording = None;
+                        }
+                    };
+                    if aligned {
+                        ui.horizontal(|ui| {
+                            let height = ui.spacing().interact_size.y;
+                            ui.allocate_ui_with_layout(
+                                vec2(name_width, height),
+                                Layout::left_to_right(Align::Center),
+                                |ui| ui.label(name),
+                            );
+                            row(ui, self);
+                        });
                     } else {
-                        let binding = self.hotkey_label(action);
-                        ui.label(
-                            RichText::new(binding.as_deref().unwrap_or(s.hotkey_none)).strong(),
-                        );
+                        caption(ui, name);
+                        ui.horizontal_wrapped(|ui| row(ui, self));
                     }
-                    if let Some(error) = self.hotkeys.as_ref().and_then(|h| h.error(action)) {
-                        let text = match error {
-                            BindingError::InUse => s.hotkey_err_in_use,
-                            BindingError::Duplicate => s.hotkey_err_duplicate,
-                            BindingError::Invalid => s.hotkey_err_invalid,
-                        };
+
+                    let error = if recording {
+                        if self.recording_invalid {
+                            Some(s.hotkey_needs_modifier)
+                        } else {
+                            None
+                        }
+                    } else {
+                        self.hotkeys
+                            .as_ref()
+                            .and_then(|h| h.error(action))
+                            .map(|error| match error {
+                                BindingError::InUse => s.hotkey_err_in_use,
+                                BindingError::Duplicate => s.hotkey_err_duplicate,
+                                BindingError::Invalid => s.hotkey_err_invalid,
+                            })
+                    };
+                    if recording && !self.recording_invalid {
+                        let color = theme::palette_of(ui.ctx()).focus;
+                        ui.label(RichText::new(s.hotkey_recording).small().color(color));
+                    }
+                    if let Some(text) = error {
                         ui.colored_label(ui.visuals().error_fg_color, text);
                     }
-                    ui.horizontal_wrapped(|ui| {
-                        let change = ui.selectable_label(recording, s.hotkey_change);
-                        if change.clicked() {
-                            self.recording = if recording { None } else { Some(action) };
-                        }
-                        let has_binding = self.hotkey_label(action).is_some();
-                        if ui
-                            .add_enabled(has_binding, Button::new(s.hotkey_clear))
-                            .clicked()
-                        {
-                            self.config.hotkeys.insert(action, String::new());
-                            self.recording = None;
-                        }
-                    });
                 });
+                ui.add_space(ui.spacing().item_spacing.y * 0.25);
             }
+
             ui.separator();
             if ui.button(s.hotkey_restore).clicked() {
                 self.config.hotkeys = hotkeys::default_bindings();
@@ -401,7 +568,8 @@ impl App {
     }
 
     /// While recording, the next Ctrl/Alt + key combination becomes the action's hotkey;
-    /// Esc cancels. Global hotkeys are suspended meanwhile (`App::sync_hotkeys`).
+    /// Esc cancels; a key without Ctrl/Alt shows a message. Global hotkeys are suspended
+    /// meanwhile (`App::sync_hotkeys`).
     fn record_hotkey(&mut self, ui: &mut Ui) {
         let Some(action) = self.recording else {
             return;
@@ -419,16 +587,21 @@ impl App {
                     self.recording = None;
                     return;
                 }
-                if let Some(binding) = hotkeys::binding_from_egui(modifiers, key) {
-                    self.config.hotkeys.insert(action, binding);
-                    self.recording = None;
-                    return;
+                match hotkeys::binding_from_egui(modifiers, key) {
+                    Some(binding) => {
+                        self.config.hotkeys.insert(action, binding);
+                        self.recording = None;
+                        self.recording_invalid = false;
+                        return;
+                    }
+                    None => self.recording_invalid = true,
                 }
             }
         }
     }
 
     fn appearance_tab(&mut self, ui: &mut Ui, s: &'static Strings) {
+        let gap = section_gap(ui);
         card(ui, s.card_panel_look, |ui| {
             let appearance = &mut self.config.appearance;
 
@@ -494,7 +667,7 @@ impl App {
                 .labelled_by(label.id);
         });
 
-        ui.add_space(8.0);
+        ui.add_space(gap);
         card(ui, s.card_window, |ui| {
             toggle_switch(
                 ui,
@@ -506,7 +679,8 @@ impl App {
             .on_hover_text(s.close_to_tray_tip);
         });
 
-        ui.add_space(8.0);
+        ui.add_space(gap);
+        // Magnifier border: its own colour presets, independent of the panel theme.
         card(ui, s.card_lupa_look, |ui| {
             let appearance = &mut self.config.appearance;
             a11y_group(ui, Role::RadioGroup, s.border_colors, |ui| {
@@ -561,7 +735,7 @@ impl App {
             ui.label(s.tray_notice_text);
             ui.checkbox(&mut self.tray_notice_dont_show, s.tray_notice_dont_show);
             ui.horizontal_wrapped(|ui| {
-                minimize = ui.button(s.tray_notice_minimize).clicked();
+                minimize = primary_button(ui, true, s.tray_notice_minimize).clicked();
                 quit = ui.button(s.tray_notice_quit).clicked();
             });
         });
@@ -602,17 +776,17 @@ impl App {
             ui.label(text);
             if last {
                 ui.add_space(4.0);
-                ui.colored_label(ui.visuals().warn_fg_color, s.onboarding_tip);
+                info_box(ui, s.onboarding_tip);
             }
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
+                if last {
+                    done = primary_button(ui, true, s.onboarding_finish).clicked();
+                } else {
+                    next = primary_button(ui, true, s.onboarding_next).clicked();
+                }
                 if step > 0 {
                     back = ui.button(s.onboarding_back).clicked();
-                }
-                if last {
-                    done = ui.button(s.onboarding_finish).clicked();
-                } else {
-                    next = ui.button(s.onboarding_next).clicked();
                 }
                 if !last {
                     done |= ui.button(s.onboarding_skip).clicked();
@@ -630,31 +804,37 @@ impl App {
         }
     }
 
+    /// Status / auto-save note on the left, Quit on the right.
     fn footer(&mut self, ui: &mut Ui, s: &'static Strings) {
-        ui.horizontal_wrapped(|ui| {
-            if ui.button(s.quit).on_hover_text(s.quit_tip).clicked() {
-                let ctx = ui.ctx().clone();
-                self.quit(&ctx);
-            }
-            self.status_ui(ui);
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button(s.quit).on_hover_text(s.quit_tip).clicked() {
+                    let ctx = ui.ctx().clone();
+                    self.quit(&ctx);
+                }
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    if !self.status_ui(ui) {
+                        ui.label(RichText::new(s.autosave_note).small().weak());
+                    }
+                });
+            });
         });
     }
 
-    fn status_ui(&mut self, ui: &mut Ui) {
+    /// Shows the current status message; returns false when there is none.
+    fn status_ui(&mut self, ui: &mut Ui) -> bool {
         let Some(status) = &self.status else {
-            return;
+            return false;
         };
         let now = Instant::now();
         if now >= status.until {
             self.status = None;
-            return;
+            return false;
         }
-        let color = if status.is_error {
-            ui.visuals().error_fg_color
-        } else {
-            theme::current_palette(ui.ctx(), &self.config.appearance).success
-        };
+        let p = theme::palette_of(ui.ctx());
+        let color = if status.is_error { p.error } else { p.success };
         ui.label(RichText::new(&status.text).color(color).strong());
         ui.ctx().request_repaint_after(status.until - now);
+        true
     }
 }

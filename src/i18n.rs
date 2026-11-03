@@ -186,6 +186,11 @@ pub struct Strings {
     pub onboarding_finish: &'static str,
     pub onboarding_step: fn(usize, usize) -> String,
 
+    // Redesign
+    pub app_subtitle: &'static str,
+    pub card_view: &'static str,
+    pub hotkey_needs_modifier: &'static str,
+
     // Footer and status
     pub quit: &'static str,
     pub quit_tip: &'static str,
@@ -301,7 +306,7 @@ pub static PT: Strings = Strings {
     action_show_panel: "Mostrar o painel",
     hotkey_none: "Nenhum",
     hotkey_change: "Alterar",
-    hotkey_clear: "Remover",
+    hotkey_clear: "🗑 Remover",
     hotkey_restore: "Restaurar padrões",
     hotkey_recording: "Pressione a nova combinação (Ctrl ou Alt + uma tecla). Esc cancela.",
     hotkey_err_in_use: "⚠ Já usado por outro programa",
@@ -335,6 +340,9 @@ pub static PT: Strings = Strings {
     onboarding_next: "Próximo",
     onboarding_finish: "Começar",
     onboarding_step: |n, total| format!("Passo {n} de {total}"),
+    app_subtitle: "Lupa de tela e captura de área",
+    card_view: "Zoom e atualização",
+    hotkey_needs_modifier: "⚠ Use Ctrl ou Alt junto com uma tecla. Esc cancela.",
     quit: "Sair",
     quit_tip: "Fecha o aplicativo e a lupa.",
     saved_settings: "✔ Configurações salvas",
@@ -452,7 +460,7 @@ pub static EN: Strings = Strings {
     action_show_panel: "Show the panel",
     hotkey_none: "None",
     hotkey_change: "Change",
-    hotkey_clear: "Remove",
+    hotkey_clear: "🗑 Remove",
     hotkey_restore: "Restore defaults",
     hotkey_recording: "Press the new combination (Ctrl or Alt + a key). Esc cancels.",
     hotkey_err_in_use: "⚠ Already used by another program",
@@ -486,6 +494,9 @@ pub static EN: Strings = Strings {
     onboarding_next: "Next",
     onboarding_finish: "Get started",
     onboarding_step: |n, total| format!("Step {n} of {total}"),
+    app_subtitle: "Screen magnifier & area capture",
+    card_view: "Zoom & refresh",
+    hotkey_needs_modifier: "⚠ Use Ctrl or Alt together with a key. Esc cancels.",
     quit: "Quit",
     quit_tip: "Closes the app and the magnifier.",
     saved_settings: "✔ Settings saved",
@@ -639,6 +650,9 @@ mod tests {
             s.onboarding_back,
             s.onboarding_next,
             s.onboarding_finish,
+            s.app_subtitle,
+            s.card_view,
+            s.hotkey_needs_modifier,
             s.selector_hint,
             s.selector_too_small,
             s.lupa_hint,
@@ -701,7 +715,7 @@ mod tests {
         let mut fonts = Fonts::new(TextOptions::default(), FontDefinitions::default());
         let font = FontId::proportional(18.0);
         // Symbols drawn by the panel outside the translation tables.
-        let panel_symbols = "↖↗◎↙↘−+×%";
+        let panel_symbols = "↖↗◎↙↘−+×%ℹ…";
         for lang in Lang::ALL {
             let s = tr(lang);
             let mut texts: Vec<String> = static_strings(s).iter().map(|t| t.to_string()).collect();

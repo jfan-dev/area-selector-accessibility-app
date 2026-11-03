@@ -1,9 +1,16 @@
-//! Small accessible widgets used by the panel.
+//! Small accessible widgets used by the panel. Colours come from the active theme
+//! ([`theme::palette_of`]), never hardcoded per widget.
 
+use crate::theme;
 use eframe::egui::{
     self, pos2, vec2, Button, Color32, Frame, Label, Margin, Response, RichText, Role, Sense,
-    Slider, StrokeKind, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo,
+    Slider, Stroke, StrokeKind, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo,
 };
+
+/// Vertical gap between major sections (about 12 px at 100 % text size).
+pub fn section_gap(ui: &Ui) -> f32 {
+    ui.spacing().item_spacing.y * 1.5
+}
 
 /// On/off switch followed by `"{label}: {state}"`. The state is written in words, not
 /// only shown by the knob position, and screen readers announce it as a switch.
@@ -77,23 +84,142 @@ pub fn a11y_group<R>(
     .inner
 }
 
-/// A titled group with padding, filling the available width. It is also a named
-/// group for screen readers.
+/// A titled card (surface colour, theme border, about 14 px padding) filling the
+/// available width. It is also a named group for screen readers.
 pub fn card<R>(ui: &mut Ui, title: &str, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
-    let margin = (ui.spacing().item_spacing.x * 0.9) as i8;
-    Frame::group(ui.style())
+    card_sized(ui, title, 0.0, add_contents).0
+}
+
+/// [`card`] that is at least `min_height` tall (outer size). Also returns the height the
+/// card needs for its own content, so cards side by side can share the tallest height
+/// (see [`equal_height_row`]).
+pub fn card_sized<R>(
+    ui: &mut Ui,
+    title: &str,
+    min_height: f32,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> (R, f32) {
+    let p = theme::palette_of(ui.ctx());
+    let margin = (ui.spacing().item_spacing.x * 1.75) as i8;
+    let chrome = 2.0 * f32::from(margin) + 2.0 * p.border_width;
+    Frame::NONE
+        .fill(p.surface)
+        .stroke(Stroke::new(p.border_width, p.border))
+        .corner_radius(p.corner_radius)
         .inner_margin(Margin::same(margin))
-        .corner_radius(8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            a11y_group(ui, Role::Group, title, |ui| {
-                let size = ui.text_style_height(&TextStyle::Heading) * 0.8;
-                ui.label(RichText::new(title).size(size).strong());
-                ui.add_space(ui.spacing().item_spacing.y * 0.3);
-                add_contents(ui)
-            })
+            // Before the content: egui reserves the minimum height from the cursor.
+            ui.set_min_height((min_height - chrome).max(0.0));
+            // Same look in one or two columns: controls keep their natural width
+            // (`ui.columns` would otherwise stretch them).
+            let (result, content_height) = ui
+                .with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    a11y_group(ui, Role::Group, title, |ui| {
+                        ui.label(RichText::new(title).heading().strong());
+                        ui.add_space(ui.spacing().item_spacing.y * 0.25);
+                        let result = add_contents(ui);
+                        // Measured inside the group: what the content itself needs,
+                        // unaffected by the stretched height of the previous frame.
+                        (result, ui.min_rect().height())
+                    })
+                })
+                .inner;
+            (result, content_height + chrome)
         })
         .inner
+}
+
+/// Height shared by the cards of one side-by-side row: the tallest natural height seen
+/// in the previous frame. Call [`set_equal_height_row`] with this frame's tallest one.
+pub fn equal_height_row(ui: &Ui, id: egui::Id) -> f32 {
+    ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0)
+}
+
+/// Stores the row height for the next frame (repaints once if it changed, so the
+/// cards settle immediately).
+pub fn set_equal_height_row(ui: &Ui, id: egui::Id, height: f32) {
+    // Only real passes count: egui's sizing / discarded passes lay text out with other
+    // widths, which would make the row grow.
+    if ui.is_sizing_pass() || ui.ctx().will_discard() {
+        return;
+    }
+    let previous = equal_height_row(ui, id);
+    if (previous - height).abs() > 0.5 {
+        ui.ctx().data_mut(|d| d.insert_temp(id, height));
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Primary action: filled with the accent colour.
+pub fn primary_button(ui: &mut Ui, enabled: bool, text: &str) -> Response {
+    let p = theme::palette_of(ui.ctx());
+    let button = Button::new(RichText::new(text).color(p.accent_text).strong()).fill(p.accent);
+    ui.add_enabled(enabled, button)
+}
+
+/// Removal action: outlined in the error colour. Callers include an icon/word in the
+/// text (e.g. "🗑 Remove") so it doesn't rely on colour alone.
+pub fn remove_button(ui: &mut Ui, enabled: bool, text: &str) -> Response {
+    let p = theme::palette_of(ui.ctx());
+    let button = Button::new(RichText::new(text).color(p.error))
+        .fill(p.surface)
+        .stroke(Stroke::new(p.border_width.max(1.5), p.error));
+    ui.add_enabled(enabled, button)
+}
+
+/// Supplementary information in smaller text on a distinct background.
+pub fn info_box(ui: &mut Ui, text: &str) {
+    let p = theme::palette_of(ui.ctx());
+    let margin = (ui.spacing().item_spacing.x) as i8;
+    Frame::NONE
+        .fill(p.surface2)
+        .stroke(Stroke::new(p.border_width, p.border))
+        .corner_radius(p.corner_radius)
+        .inner_margin(Margin::same(margin))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(format!("ℹ {text}")).small().color(p.text2));
+        });
+}
+
+/// Read-only field showing a keyboard shortcut. `highlighted` = recording.
+pub fn key_field(ui: &mut Ui, text: &str, highlighted: bool, min_width: f32) -> Response {
+    let p = theme::palette_of(ui.ctx());
+    let stroke = if highlighted {
+        Stroke::new(p.border_width + 1.5, p.focus)
+    } else {
+        Stroke::new(p.border_width, p.border)
+    };
+    Frame::NONE
+        .fill(p.surface)
+        .stroke(stroke)
+        .corner_radius(p.corner_radius)
+        .inner_margin(Margin::symmetric(8, 4))
+        .show(ui, |ui| {
+            ui.set_min_width(min_width);
+            ui.label(RichText::new(text).monospace().strong())
+        })
+        .inner
+}
+
+/// Adds a slider drawn with the theme's track colour (black/white in high contrast)
+/// and an accent-outlined handle. egui paints the rail with the resting widget fill,
+/// so it is changed only around the slider, not for checkboxes or buttons.
+pub fn themed_slider(ui: &mut Ui, slider: Slider<'_>) -> Response {
+    let p = theme::palette_of(ui.ctx());
+    ui.scope(|ui| {
+        let widgets = &mut ui.visuals_mut().widgets;
+        widgets.inactive.bg_fill = p.track;
+        let width = if p.variant.is_high_contrast() {
+            2.5
+        } else {
+            1.5
+        };
+        widgets.inactive.fg_stroke = Stroke::new(width, p.accent);
+        ui.add(slider)
+    })
+    .inner
 }
 
 /// Strong label used as a visible caption for the control below it.
@@ -192,7 +318,7 @@ pub fn slider_with_caption(
         ui.available_width() - ui.spacing().interact_size.y * 0.5
     };
     ui.spacing_mut().slider_width = rail.max(MIN_SLIDER_WIDTH);
-    ui.add(slider.show_value(show_value)).labelled_by(label.id)
+    themed_slider(ui, slider.show_value(show_value)).labelled_by(label.id)
 }
 
 /// Width taken by a radio button with this label.
@@ -265,29 +391,31 @@ pub fn icon_pad(
     gap: f32,
 ) -> Option<(usize, usize)> {
     let side = 3.0 * size + 2.0 * gap;
-    let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+    let rect = egui::Rect::from_min_size(ui.cursor().min, vec2(side, side));
     let mut clicked = None;
-    // Small padding: the symbol alone sets the size (see `icon_button_sized`).
-    let saved_padding = ui.spacing().button_padding;
-    ui.spacing_mut().button_padding = vec2(4.0, 4.0);
-    for (row, cells) in cells.iter().enumerate() {
-        for (col, cell) in cells.iter().enumerate() {
-            let Some((icon, name)) = cell else { continue };
-            let min = rect.min + vec2(col as f32, row as f32) * (size + gap);
-            let cell_rect = egui::Rect::from_min_size(min, vec2(size, size));
-            let response = ui
-                .add_enabled_ui(enabled, |ui| {
-                    ui.put(cell_rect, Button::new(*icon).min_size(vec2(size, size)))
-                })
-                .inner
-                .on_hover_text(*name);
-            set_spoken_name(ui, &response, name);
-            if response.clicked() {
-                clicked = Some((row, col));
+    // One child region for the whole pad (one layout allocation, no extra spacing).
+    ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
+        if !enabled {
+            ui.disable();
+        }
+        // Small padding: the symbol alone sets the size (see `icon_button_sized`).
+        ui.spacing_mut().button_padding = vec2(4.0, 4.0);
+        ui.allocate_rect(rect, Sense::hover());
+        for (row, cells) in cells.iter().enumerate() {
+            for (col, cell) in cells.iter().enumerate() {
+                let Some((icon, name)) = cell else { continue };
+                let min = rect.min + vec2(col as f32, row as f32) * (size + gap);
+                let cell_rect = egui::Rect::from_min_size(min, vec2(size, size));
+                let response = ui
+                    .put(cell_rect, Button::new(*icon).min_size(vec2(size, size)))
+                    .on_hover_text(*name);
+                set_spoken_name(ui, &response, name);
+                if response.clicked() {
+                    clicked = Some((row, col));
+                }
             }
         }
-    }
-    ui.spacing_mut().button_padding = saved_padding;
+    });
     clicked
 }
 

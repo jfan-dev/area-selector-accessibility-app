@@ -84,6 +84,10 @@ pub struct App {
     registered_bindings: Option<Bindings>,
     /// Action whose new combination is being recorded in the Hotkeys tab.
     recording: Option<Action>,
+    /// The last key pressed while recording had no Ctrl/Alt (shows a message).
+    recording_invalid: bool,
+    /// App icon for the panel header (uploaded on first use).
+    icon_texture: Option<TextureHandle>,
     /// System tray icon (`None` in tests, or if Windows refused to create it).
     tray: Option<Tray>,
     /// Set by "Quit": the next close request really closes the app.
@@ -97,6 +101,9 @@ pub struct App {
     /// How far the panel content sticks out past the window edge (layout tests).
     #[cfg(test)]
     layout_overflow: f32,
+    /// Height taken by the side-by-side card row and the shared card height (tests).
+    #[cfg(test)]
+    card_row: (f32, f32),
 }
 
 impl App {
@@ -134,6 +141,8 @@ impl App {
             hotkeys,
             registered_bindings: None,
             recording: None,
+            recording_invalid: false,
+            icon_texture: None,
             show_onboarding,
             tray,
             quitting: false,
@@ -142,6 +151,8 @@ impl App {
             onboarding_step: 0,
             #[cfg(test)]
             layout_overflow: 0.0,
+            #[cfg(test)]
+            card_row: (0.0, 0.0),
         };
         app.apply_theme(ctx);
         app.sync_hotkeys();
@@ -226,6 +237,17 @@ impl App {
         if let Some(tray) = &mut self.tray {
             tray.update(&labels, state);
         }
+    }
+
+    /// The app icon as a texture for the panel header.
+    fn icon_texture(&mut self, ctx: &egui::Context) -> Option<TextureHandle> {
+        if self.icon_texture.is_none() {
+            let icon = area_selector::icon::app_icon()?;
+            let size = [icon.width as usize, icon.height as usize];
+            let image = ColorImage::from_rgba_unmultiplied(size, &icon.rgba);
+            self.icon_texture = Some(ctx.load_texture("app_icon", image, TextureOptions::LINEAR));
+        }
+        self.icon_texture.clone()
     }
 
     /// Pretty name of an action's hotkey, if it has one.
@@ -501,10 +523,11 @@ mod tests {
 
     /// Renders the real panel headlessly and returns how far its content sticks out
     /// past the window's right edge (0 = everything fits).
-    fn overflow(lang: Lang, width: f32, ui_scale: f32, tab: Tab) -> f32 {
+    fn overflow(lang: Lang, width: f32, ui_scale: f32, tab: Tab, high_contrast: bool) -> f32 {
         let ctx = egui::Context::default();
         let mut config = AppConfig::default();
         config.appearance.ui_scale = ui_scale;
+        config.appearance.high_contrast = high_contrast;
         config.area = Some(Area {
             start: SerializablePos { x: 10.0, y: 20.0 },
             end: SerializablePos { x: 304.0, y: 234.0 },
@@ -530,12 +553,14 @@ mod tests {
             for width in [320.0, 400.0, 480.0, 600.0, 900.0] {
                 for scale in [1.0, 1.5, 2.0] {
                     for tab in [Tab::Home, Tab::Hotkeys, Tab::Appearance] {
-                        let over = overflow(lang, width, scale, tab);
-                        assert!(
-                            over <= 1.0,
-                            "{lang:?} {tab:?} at {width} px, {:.0}%: content is {over:.0} px too wide",
-                            scale * 100.0
-                        );
+                        for high_contrast in [false, true] {
+                            let over = overflow(lang, width, scale, tab, high_contrast);
+                            assert!(
+                                over <= 1.0,
+                                "{lang:?} {tab:?} at {width} px, {:.0}%, high contrast {high_contrast}: content is {over:.0} px too wide",
+                                scale * 100.0
+                            );
+                        }
                     }
                 }
             }
@@ -584,6 +609,140 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /// Renders the real panel with the GPU and saves PNG screenshots for visual review.
+    /// Run with `cargo wtest render_screenshots -- --ignored` (output: `target/screenshots`).
+    #[test]
+    #[ignore = "needs a GPU; run explicitly to review the look"]
+    fn render_screenshots() {
+        use area_selector::config::ThemeMode;
+        let dir = std::path::Path::new("target").join("screenshots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let cases = [
+            ("home_light", ThemeMode::Light, false, Tab::Home, 900.0, 1.0),
+            ("home_dark", ThemeMode::Dark, false, Tab::Home, 900.0, 1.0),
+            (
+                "home_hc_light",
+                ThemeMode::Light,
+                true,
+                Tab::Home,
+                900.0,
+                1.0,
+            ),
+            ("home_hc_dark", ThemeMode::Dark, true, Tab::Home, 900.0, 1.0),
+            (
+                "home_narrow_dark",
+                ThemeMode::Dark,
+                false,
+                Tab::Home,
+                480.0,
+                1.0,
+            ),
+            (
+                "hotkeys_dark",
+                ThemeMode::Dark,
+                false,
+                Tab::Hotkeys,
+                560.0,
+                1.0,
+            ),
+            (
+                "hotkeys_hc_light",
+                ThemeMode::Light,
+                true,
+                Tab::Hotkeys,
+                560.0,
+                1.0,
+            ),
+            (
+                "appearance_light",
+                ThemeMode::Light,
+                false,
+                Tab::Appearance,
+                560.0,
+                1.0,
+            ),
+            (
+                "appearance_hc_dark",
+                ThemeMode::Dark,
+                true,
+                Tab::Appearance,
+                560.0,
+                1.0,
+            ),
+            (
+                "home_200_dark",
+                ThemeMode::Dark,
+                false,
+                Tab::Home,
+                560.0,
+                2.0,
+            ),
+        ];
+        for (name, theme, high_contrast, tab, width, scale) in cases {
+            let mut config = AppConfig {
+                onboarding_done: true,
+                area: Some(Area {
+                    start: SerializablePos { x: 10.0, y: 20.0 },
+                    end: SerializablePos { x: 304.0, y: 234.0 },
+                }),
+                ..AppConfig::default()
+            };
+            config.appearance.theme = theme;
+            config.appearance.high_contrast = high_contrast;
+            config.appearance.ui_scale = scale;
+            let mut app = App::with_config(&egui::Context::default(), config, Lang::Pt, None, None);
+            app.tab = tab;
+            app.applied_appearance = None; // apply to the harness context below
+            let mut harness = egui_kittest::Harness::builder()
+                .with_size(vec2(width, 820.0))
+                .wgpu()
+                .build_ui_state(
+                    |ui, app: &mut App| {
+                        app.apply_theme(ui.ctx());
+                        app.panel_ui(ui);
+                    },
+                    app,
+                );
+            harness.run();
+            let image = harness.render().expect("render");
+            image.save(dir.join(format!("{name}.png"))).unwrap();
+        }
+    }
+
+    /// Side-by-side cards share the taller card's height, without extra space (egui's
+    /// `set_min_height` counts from the cursor, which once doubled the row height).
+    #[test]
+    fn side_by_side_cards_have_equal_height() {
+        for lang in Lang::ALL {
+            for scale in [1.0, 1.5] {
+                let ctx = egui::Context::default();
+                let mut config = AppConfig {
+                    onboarding_done: true,
+                    ..AppConfig::default()
+                };
+                config.appearance.ui_scale = scale;
+                let mut app = App::with_config(&ctx, config, lang, None, None);
+                let input = || RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0))),
+                    ..Default::default()
+                };
+                for _ in 0..4 {
+                    let mut output = ctx.run_ui(input(), |ui| app.panel_ui(ui));
+                    output.textures_delta.clear();
+                }
+                let (block, card) = app.card_row;
+                assert!(
+                    card > 50.0,
+                    "{lang:?} {scale}: cards should be side by side"
+                );
+                assert!(
+                    (block - card).abs() < 2.0,
+                    "{lang:?} {scale}: row takes {block:.1} px but cards are {card:.1} px"
+                );
             }
         }
     }

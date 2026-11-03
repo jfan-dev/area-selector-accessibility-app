@@ -39,7 +39,7 @@ A short guide opens the first time; reopen it any time with the **?** button nex
 | **Status chips** (Area · Magnifier · Passthrough) | Show the current state and are also shortcuts: click *Area* to select a new one, *Magnifier* to open/close it, *Passthrough* to toggle it. |
 | **Home** tab | *Select area*, open/close the magnifier, the **passthrough switch**, zoom (− / slider / +), refresh rate (FPS) and a **3×3 positioning pad** (corners and centre). Exact X/Y values are under *Advanced*. |
 | **Hotkeys** tab | Change, remove or restore the global hotkeys (see below). Warns when a combination is used by another program or twice. |
-| **Appearance** tab | Theme (same as Windows / light / dark), **high contrast**, **text size 100–200 %**, language, close-to-tray, and the magnifier border (colour presets incl. a colour-blind-friendly one, thickness, mode badge). |
+| **Appearance** tab | Theme (same as Windows / light / dark) plus a **high contrast** switch — four colour schemes in total —, **text size 100–200 %**, language, close-to-tray, and the magnifier border (colour presets incl. a colour-blind-friendly one, thickness, mode badge). |
 | **Quit** | Closes the app and the magnifier. |
 
 Every control has a tooltip and can be reached with **Tab** (Space/Enter activates it); screen readers such as Windows Narrator announce the groups and controls.

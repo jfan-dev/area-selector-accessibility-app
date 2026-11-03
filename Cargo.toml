@@ -36,6 +36,10 @@ windows = { version = "0.62", features = [
 ] }
 
 
+[dev-dependencies]
+# Renders the real panel with wgpu for visual checks (screenshot test, ignored by default).
+egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
+
 [build-dependencies]
 embed-resource = "2.5"
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
