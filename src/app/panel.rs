@@ -9,6 +9,7 @@ use super::{App, Tab};
 use area_selector::config::{
     BorderPreset, ThemeMode, BORDER_WIDTH_RANGE, LUPA_FPS_RANGE, LUPA_ZOOM_RANGE, UI_SCALE_RANGE,
 };
+use area_selector::hotkeys::{self, Action, BindingError};
 use area_selector::i18n::{Lang, Strings};
 use area_selector::lupa::{self, Placement};
 use area_selector::theme;
@@ -40,15 +41,22 @@ impl App {
 
         CentralPanel::default().show(ui, |ui| {
             self.header(ui, s);
-            let tabs_width = button_width(ui, s.tab_home) + button_width(ui, s.tab_appearance);
+            let tabs_width = button_width(ui, s.tab_home)
+                + button_width(ui, s.tab_hotkeys)
+                + button_width(ui, s.tab_appearance);
             row_or_column(ui, tabs_width, |ui| {
                 ui.selectable_value(&mut self.tab, Tab::Home, s.tab_home);
+                ui.selectable_value(&mut self.tab, Tab::Hotkeys, s.tab_hotkeys);
                 ui.selectable_value(&mut self.tab, Tab::Appearance, s.tab_appearance);
             });
+            if self.tab != Tab::Hotkeys {
+                self.recording = None;
+            }
             ui.separator();
             ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 match self.tab {
                     Tab::Home => self.home_tab(ui, s),
+                    Tab::Hotkeys => self.hotkeys_tab(ui, s),
                     Tab::Appearance => self.appearance_tab(ui, s),
                 }
                 self.scroll_focus_into_view(ui);
@@ -105,22 +113,19 @@ impl App {
             s.chip_passthrough_off
         };
 
+        let area_tip = self.with_hotkey(s.chip_area_tip, Action::SelectArea);
+        let lupa_tip = self.with_hotkey(lupa_tip, Action::ToggleLupa);
+        let passthrough_tip = self.with_hotkey(s.chip_passthrough_tip, Action::TogglePassthrough);
         let (mut select_area, mut toggle_lupa, mut toggle_passthrough) = (false, false, false);
         a11y_group(ui, Role::Group, s.status_group, |ui| {
             ui.horizontal_wrapped(|ui| {
-                select_area =
-                    chip_button(ui, &area_text, has_area, true, s.chip_area_tip).clicked();
+                select_area = chip_button(ui, &area_text, has_area, true, &area_tip).clicked();
                 toggle_lupa =
-                    chip_button(ui, lupa_text, lupa_open, has_area || lupa_open, lupa_tip)
+                    chip_button(ui, lupa_text, lupa_open, has_area || lupa_open, &lupa_tip)
                         .clicked();
-                toggle_passthrough = chip_button(
-                    ui,
-                    passthrough_text,
-                    passthrough,
-                    true,
-                    s.chip_passthrough_tip,
-                )
-                .clicked();
+                toggle_passthrough =
+                    chip_button(ui, passthrough_text, passthrough, true, &passthrough_tip)
+                        .clicked();
             });
         });
 
@@ -144,7 +149,7 @@ impl App {
         card(ui, s.card_area, |ui| {
             if ui
                 .button(s.select_area)
-                .on_hover_text(s.select_area_tip)
+                .on_hover_text(self.with_hotkey(s.select_area_tip, Action::SelectArea))
                 .clicked()
             {
                 self.open_selector();
@@ -165,7 +170,7 @@ impl App {
             if self.lupa.is_some() {
                 if ui
                     .button(s.close_lupa)
-                    .on_hover_text(s.close_lupa_tip)
+                    .on_hover_text(self.with_hotkey(s.close_lupa_tip, Action::ToggleLupa))
                     .clicked()
                 {
                     self.close_lupa();
@@ -173,7 +178,7 @@ impl App {
             } else {
                 let open = ui
                     .add_enabled(self.saved_area.is_some(), Button::new(s.open_lupa))
-                    .on_hover_text(s.open_lupa_tip)
+                    .on_hover_text(self.with_hotkey(s.open_lupa_tip, Action::ToggleLupa))
                     .on_disabled_hover_text(s.open_lupa_needs_area_tip);
                 if open.clicked() {
                     let ctx = ui.ctx().clone();
@@ -181,6 +186,7 @@ impl App {
                 }
             }
 
+            let passthrough_tip = self.with_hotkey(s.passthrough_tip, Action::TogglePassthrough);
             toggle_switch(
                 ui,
                 &mut self.config.lupa_passthrough,
@@ -188,7 +194,7 @@ impl App {
                 s.on,
                 s.off,
             )
-            .on_hover_text(s.passthrough_tip);
+            .on_hover_text(passthrough_tip);
 
             ui.add_space(4.0);
             self.zoom_controls(ui, s);
@@ -318,6 +324,93 @@ impl App {
         let [x, y] = placement.position(screen, size);
         self.config.lupa_pos_x = x;
         self.config.lupa_pos_y = y;
+    }
+
+    /// `"{tip} ({hotkey})"` when the action has a hotkey.
+    fn with_hotkey(&self, tip: &str, action: Action) -> String {
+        match self.hotkey_label(action) {
+            Some(hotkey) => format!("{tip} ({hotkey})"),
+            None => tip.to_owned(),
+        }
+    }
+
+    fn hotkeys_tab(&mut self, ui: &mut Ui, s: &'static Strings) {
+        self.record_hotkey(ui);
+        card(ui, s.card_hotkeys, |ui| {
+            ui.weak(s.hotkeys_note);
+            for action in Action::ALL {
+                ui.separator();
+                let name = s.action_name(action);
+                a11y_group(ui, Role::Group, name, |ui| {
+                    caption(ui, name);
+                    let recording = self.recording == Some(action);
+                    if recording {
+                        let color = ui.visuals().selection.bg_fill;
+                        ui.label(RichText::new(s.hotkey_recording).color(color).strong());
+                    } else {
+                        let binding = self.hotkey_label(action);
+                        ui.label(
+                            RichText::new(binding.as_deref().unwrap_or(s.hotkey_none)).strong(),
+                        );
+                    }
+                    if let Some(error) = self.hotkeys.as_ref().and_then(|h| h.error(action)) {
+                        let text = match error {
+                            BindingError::InUse => s.hotkey_err_in_use,
+                            BindingError::Duplicate => s.hotkey_err_duplicate,
+                            BindingError::Invalid => s.hotkey_err_invalid,
+                        };
+                        ui.colored_label(ui.visuals().error_fg_color, text);
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        let change = ui.selectable_label(recording, s.hotkey_change);
+                        if change.clicked() {
+                            self.recording = if recording { None } else { Some(action) };
+                        }
+                        let has_binding = self.hotkey_label(action).is_some();
+                        if ui
+                            .add_enabled(has_binding, Button::new(s.hotkey_clear))
+                            .clicked()
+                        {
+                            self.config.hotkeys.insert(action, String::new());
+                            self.recording = None;
+                        }
+                    });
+                });
+            }
+            ui.separator();
+            if ui.button(s.hotkey_restore).clicked() {
+                self.config.hotkeys = hotkeys::default_bindings();
+                self.recording = None;
+            }
+        });
+    }
+
+    /// While recording, the next Ctrl/Alt + key combination becomes the action's hotkey;
+    /// Esc cancels. Global hotkeys are suspended meanwhile (`App::sync_hotkeys`).
+    fn record_hotkey(&mut self, ui: &mut Ui) {
+        let Some(action) = self.recording else {
+            return;
+        };
+        let events = ui.ctx().input(|i| i.events.clone());
+        for event in events {
+            if let Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } = event
+            {
+                if key == Key::Escape {
+                    self.recording = None;
+                    return;
+                }
+                if let Some(binding) = hotkeys::binding_from_egui(modifiers, key) {
+                    self.config.hotkeys.insert(action, binding);
+                    self.recording = None;
+                    return;
+                }
+            }
+        }
     }
 
     fn appearance_tab(&mut self, ui: &mut Ui, s: &'static Strings) {

@@ -1,3 +1,4 @@
+use crate::hotkeys::{self, Bindings};
 use crate::i18n::Lang;
 use crate::model::Area;
 use eframe::egui::Color32;
@@ -106,6 +107,9 @@ pub struct AppConfig {
     pub language: Option<Lang>,
     #[serde(default)]
     pub appearance: Appearance,
+    /// System-wide shortcuts. Missing actions get their defaults on load.
+    #[serde(default = "hotkeys::default_bindings")]
+    pub hotkeys: Bindings,
 }
 
 fn default_lupa_fps() -> u32 {
@@ -123,6 +127,7 @@ impl Default for AppConfig {
             lupa_passthrough: false,
             language: None,
             appearance: Appearance::default(),
+            hotkeys: hotkeys::default_bindings(),
         }
     }
 }
@@ -245,10 +250,12 @@ pub fn load_config_from(path: &Path) -> AppConfig {
             return AppConfig::default();
         }
     };
-    serde_json::from_str(&data).unwrap_or_else(|err| {
+    let mut cfg: AppConfig = serde_json::from_str(&data).unwrap_or_else(|err| {
         log::warn!("invalid config {}: {err}; using defaults", path.display());
         AppConfig::default()
-    })
+    });
+    cfg.hotkeys = hotkeys::with_defaults(std::mem::take(&mut cfg.hotkeys));
+    cfg
 }
 
 #[cfg(test)]
@@ -287,6 +294,11 @@ mod tests {
                 border_preset: BorderPreset::BlueOrange,
                 border_width: 6.0,
                 show_mode_badge: false,
+            },
+            hotkeys: {
+                let mut bindings = hotkeys::default_bindings();
+                bindings.insert(hotkeys::Action::ZoomIn, String::new());
+                bindings
             },
         };
         save_config_to(&path, &cfg).unwrap();
@@ -331,6 +343,7 @@ mod tests {
             "older configs follow the Windows language"
         );
         assert_eq!(cfg.appearance, Appearance::default());
+        assert_eq!(cfg.hotkeys, hotkeys::default_bindings());
     }
 
     #[test]

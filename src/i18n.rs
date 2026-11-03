@@ -40,6 +40,21 @@ impl Lang {
     }
 }
 
+impl Strings {
+    /// Name of a hotkey action.
+    pub fn action_name(&self, action: crate::hotkeys::Action) -> &'static str {
+        use crate::hotkeys::Action;
+        match action {
+            Action::TogglePassthrough => self.action_toggle_passthrough,
+            Action::ToggleLupa => self.action_toggle_lupa,
+            Action::SelectArea => self.action_select_area,
+            Action::ZoomIn => self.action_zoom_in,
+            Action::ZoomOut => self.action_zoom_out,
+            Action::ShowPanel => self.action_show_panel,
+        }
+    }
+}
+
 /// Returns the strings for a language.
 pub fn tr(lang: Lang) -> &'static Strings {
     match lang {
@@ -121,6 +136,25 @@ pub struct Strings {
     pub border_passthrough: &'static str,
     pub card_panel_look: &'static str,
     pub card_lupa_look: &'static str,
+
+    // Hotkeys tab
+    pub tab_hotkeys: &'static str,
+    pub card_hotkeys: &'static str,
+    pub hotkeys_note: &'static str,
+    pub action_toggle_passthrough: &'static str,
+    pub action_toggle_lupa: &'static str,
+    pub action_select_area: &'static str,
+    pub action_zoom_in: &'static str,
+    pub action_zoom_out: &'static str,
+    pub action_show_panel: &'static str,
+    pub hotkey_none: &'static str,
+    pub hotkey_change: &'static str,
+    pub hotkey_clear: &'static str,
+    pub hotkey_restore: &'static str,
+    pub hotkey_recording: &'static str,
+    pub hotkey_err_in_use: &'static str,
+    pub hotkey_err_duplicate: &'static str,
+    pub hotkey_err_invalid: &'static str,
 
     // Footer and status
     pub quit: &'static str,
@@ -226,6 +260,23 @@ pub static PT: Strings = Strings {
     card_panel_look: "Painel",
     card_lupa_look: "Borda da lupa",
 
+    tab_hotkeys: "⌨ Atalhos",
+    card_hotkeys: "Atalhos globais",
+    hotkeys_note: "Funcionam mesmo com o jogo ou outro programa em foco, e com o painel minimizado.",
+    action_toggle_passthrough: "Ligar/desligar o passthrough",
+    action_toggle_lupa: "Abrir/fechar a lupa",
+    action_select_area: "Selecionar área",
+    action_zoom_in: "Aumentar o zoom",
+    action_zoom_out: "Diminuir o zoom",
+    action_show_panel: "Mostrar o painel",
+    hotkey_none: "Nenhum",
+    hotkey_change: "Alterar",
+    hotkey_clear: "Remover",
+    hotkey_restore: "Restaurar padrões",
+    hotkey_recording: "Pressione a nova combinação (Ctrl ou Alt + uma tecla). Esc cancela.",
+    hotkey_err_in_use: "⚠ Já usado por outro programa",
+    hotkey_err_duplicate: "⚠ Usado também em outra ação",
+    hotkey_err_invalid: "⚠ Combinação inválida",
     quit: "Sair",
     quit_tip: "Fecha o aplicativo e a lupa.",
     saved_settings: "✔ Configurações salvas",
@@ -332,6 +383,23 @@ pub static EN: Strings = Strings {
     card_panel_look: "Panel",
     card_lupa_look: "Magnifier border",
 
+    tab_hotkeys: "⌨ Hotkeys",
+    card_hotkeys: "Global hotkeys",
+    hotkeys_note: "They work even while a game or another program has focus, and with the panel minimized.",
+    action_toggle_passthrough: "Turn passthrough on/off",
+    action_toggle_lupa: "Open/close the magnifier",
+    action_select_area: "Select area",
+    action_zoom_in: "Zoom in",
+    action_zoom_out: "Zoom out",
+    action_show_panel: "Show the panel",
+    hotkey_none: "None",
+    hotkey_change: "Change",
+    hotkey_clear: "Remove",
+    hotkey_restore: "Restore defaults",
+    hotkey_recording: "Press the new combination (Ctrl or Alt + a key). Esc cancels.",
+    hotkey_err_in_use: "⚠ Already used by another program",
+    hotkey_err_duplicate: "⚠ Also used by another action",
+    hotkey_err_invalid: "⚠ Invalid combination",
     quit: "Quit",
     quit_tip: "Closes the app and the magnifier.",
     saved_settings: "✔ Settings saved",
@@ -441,6 +509,23 @@ mod tests {
             s.quit_tip,
             s.saved_settings,
             s.saved_area,
+            s.tab_hotkeys,
+            s.card_hotkeys,
+            s.hotkeys_note,
+            s.action_toggle_passthrough,
+            s.action_toggle_lupa,
+            s.action_select_area,
+            s.action_zoom_in,
+            s.action_zoom_out,
+            s.action_show_panel,
+            s.hotkey_none,
+            s.hotkey_change,
+            s.hotkey_clear,
+            s.hotkey_restore,
+            s.hotkey_recording,
+            s.hotkey_err_in_use,
+            s.hotkey_err_duplicate,
+            s.hotkey_err_invalid,
             s.selector_hint,
             s.selector_too_small,
             s.lupa_hint,

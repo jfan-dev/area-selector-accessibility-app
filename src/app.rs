@@ -1,8 +1,9 @@
 mod panel;
 
 use area_selector::config::{self, AppConfig, Appearance, AutoSave, AutoSaveAction};
+use area_selector::hotkeys::{Action, Bindings, HotkeyService};
 use area_selector::i18n::{self, Lang, Strings};
-use area_selector::lupa::{LupaApp, LupaOutcome};
+use area_selector::lupa::{self, LupaApp, LupaOutcome};
 use area_selector::model::Area;
 use area_selector::theme;
 use area_selector::ui_selector::{self, AreaSelector, SelectorOutcome};
@@ -28,8 +29,19 @@ struct LupaState {
 
 type SharedLupa = Arc<Mutex<LupaState>>;
 
-fn lock(lupa: &SharedLupa) -> MutexGuard<'_, LupaState> {
-    lupa.lock().unwrap_or_else(PoisonError::into_inner)
+/// Selector state shared with its own render callback. The selector is a *deferred*
+/// viewport like the magnifier, so a hotkey can open it while the panel is minimized
+/// or hidden (an immediate viewport only repaints together with the panel).
+struct SelectorState {
+    selector: AreaSelector,
+    /// Set by the selector when the user finished or cancelled; read in `App::logic`.
+    outcome: Option<SelectorOutcome>,
+}
+
+type SharedSelector = Arc<Mutex<SelectorState>>;
+
+fn lock<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {
+    shared.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Short message shown in the panel footer (e.g. "saved", or a save error).
@@ -42,6 +54,7 @@ struct Status {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Home,
+    Hotkeys,
     Appearance,
 }
 
@@ -50,7 +63,7 @@ enum Tab {
 pub struct App {
     saved_area: Option<Area>,
     config: AppConfig,
-    selector: Option<AreaSelector>,
+    selector: Option<SharedSelector>,
     /// Rendered as a *deferred* viewport: it has its own repaint loop, so it keeps
     /// updating while the panel is minimized (an immediate viewport would freeze).
     lupa: Option<SharedLupa>,
@@ -64,6 +77,12 @@ pub struct App {
     applied_appearance: Option<Appearance>,
     /// Keyboard focus last frame, to scroll newly focused controls into view.
     last_focus: Option<Id>,
+    /// System-wide hotkeys (`None` in tests, or if Windows refused to create them).
+    hotkeys: Option<HotkeyService>,
+    /// Bindings currently registered with Windows (`None` = must re-register).
+    registered_bindings: Option<Bindings>,
+    /// Action whose new combination is being recorded in the Hotkeys tab.
+    recording: Option<Action>,
     /// How far the panel content sticks out past the window edge (layout tests).
     #[cfg(test)]
     layout_overflow: f32,
@@ -71,10 +90,16 @@ pub struct App {
 
 impl App {
     pub fn new(ctx: &egui::Context) -> Self {
-        Self::with_config(ctx, config::load_config(), Lang::system())
+        let hotkeys = HotkeyService::new(ctx);
+        Self::with_config(ctx, config::load_config(), Lang::system(), Some(hotkeys))
     }
 
-    fn with_config(ctx: &egui::Context, config: AppConfig, system_lang: Lang) -> Self {
+    fn with_config(
+        ctx: &egui::Context,
+        config: AppConfig,
+        system_lang: Lang,
+        hotkeys: Option<HotkeyService>,
+    ) -> Self {
         let mut app = Self {
             saved_area: config.area,
             autosave: AutoSave::new(&config),
@@ -86,11 +111,66 @@ impl App {
             system_lang,
             applied_appearance: None,
             last_focus: None,
+            hotkeys,
+            registered_bindings: None,
+            recording: None,
             #[cfg(test)]
             layout_overflow: 0.0,
         };
         app.apply_theme(ctx);
+        app.sync_hotkeys();
         app
+    }
+
+    /// Registers the configured hotkeys when they changed (not while recording a new
+    /// combination: then they stay suspended so they don't swallow the keys).
+    fn sync_hotkeys(&mut self) {
+        let Some(service) = &mut self.hotkeys else {
+            return;
+        };
+        if self.recording.is_some() {
+            if self.registered_bindings.take().is_some() {
+                service.suspend();
+            }
+            return;
+        }
+        if self.registered_bindings.as_ref() != Some(&self.config.hotkeys) {
+            service.apply(&self.config.hotkeys);
+            self.registered_bindings = Some(self.config.hotkeys.clone());
+        }
+    }
+
+    /// Pretty name of an action's hotkey, if it has one.
+    fn hotkey_label(&self, action: Action) -> Option<String> {
+        area_selector::hotkeys::pretty(self.config.hotkeys.get(&action)?)
+    }
+
+    /// Runs a global hotkey action. Called from [`eframe::App::logic`], so it also works
+    /// while the panel is minimized or hidden.
+    fn run_action(&mut self, ctx: &egui::Context, action: Action) {
+        match action {
+            Action::TogglePassthrough => {
+                self.config.lupa_passthrough = !self.config.lupa_passthrough;
+            }
+            Action::ToggleLupa => {
+                if self.lupa.is_some() {
+                    self.close_lupa();
+                } else {
+                    self.open_lupa(ctx);
+                }
+            }
+            Action::SelectArea => self.open_selector(),
+            Action::ZoomIn => self.config.lupa_zoom = lupa::step_zoom(self.config.lupa_zoom, 1),
+            Action::ZoomOut => self.config.lupa_zoom = lupa::step_zoom(self.config.lupa_zoom, -1),
+            Action::ShowPanel => {
+                ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(ViewportCommand::Focus);
+            }
+        }
+        // Run one full pass even if the panel is minimized/hidden, so new windows are
+        // created and setting changes reach the magnifier.
+        ctx.send_viewport_cmd(ViewportCommand::RequestPaintWhileHidden);
     }
 
     fn strings(&self) -> &'static Strings {
@@ -172,21 +252,43 @@ impl App {
         if self.selector.is_none() {
             // Screenshot is taken now, before the overlay window exists.
             let strings = self.strings();
-            self.selector = Some(AreaSelector::capture_screen().with_strings(strings));
+            let selector = AreaSelector::capture_screen().with_strings(strings);
+            self.selector = Some(Arc::new(Mutex::new(SelectorState {
+                selector,
+                outcome: None,
+            })));
         }
     }
 
     fn show_selector(&mut self, ctx: &egui::Context) {
-        let Some(selector) = &mut self.selector else {
+        let Some(selector) = &self.selector else {
             return;
         };
         let builder = AreaSelector::viewport_builder(ui_selector::screen_size(ctx));
-        let outcome =
-            ctx.show_viewport_immediate(selector_viewport_id(), builder, |ui, _| selector.ui(ui));
+        let shared = Arc::clone(selector);
+        ctx.show_viewport_deferred(selector_viewport_id(), builder, move |ui, _| {
+            let mut state = lock(&shared);
+            if state.outcome.is_some() {
+                return; // finished, waiting for the panel to close it
+            }
+            let outcome = state.selector.ui(ui);
+            if outcome != SelectorOutcome::Pending {
+                state.outcome = Some(outcome);
+                ui.ctx().send_viewport_cmd(ViewportCommand::Visible(false));
+                ui.ctx().request_repaint_of(ViewportId::ROOT);
+            }
+        });
+    }
 
+    /// Applies a finished selection (or cancellation) and closes the selector.
+    fn reap_selector(&mut self) {
+        let outcome = match &self.selector {
+            Some(selector) => lock(selector).outcome,
+            None => return,
+        };
         match outcome {
-            SelectorOutcome::Pending => {}
-            SelectorOutcome::Selected(area) => {
+            None | Some(SelectorOutcome::Pending) => {}
+            Some(SelectorOutcome::Selected(area)) => {
                 self.saved_area = Some(area);
                 self.config.area = Some(area);
                 // An open magnifier switches to the new area right away.
@@ -196,7 +298,7 @@ impl App {
                 self.save_now(Some(self.strings().saved_area));
                 self.selector = None;
             }
-            SelectorOutcome::Cancelled => self.selector = None,
+            Some(SelectorOutcome::Cancelled) => self.selector = None,
         }
     }
 
@@ -266,14 +368,28 @@ impl App {
 }
 
 impl eframe::App for App {
+    /// Runs before every `ui` pass and also while the panel is minimized or hidden.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let actions = self
+            .hotkeys
+            .as_mut()
+            .map(HotkeyService::poll)
+            .unwrap_or_default();
+        for action in actions {
+            self.run_action(ctx, action);
+        }
+        self.reap_selector();
+        self.reap_closed_lupa();
+        self.sync_hotkeys();
+        self.autosave(ctx);
+    }
+
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = &ui.ctx().clone();
         self.apply_theme(ctx);
-        self.reap_closed_lupa();
         self.panel_ui(ui);
         self.show_selector(ctx);
         self.show_lupa(ctx);
-        self.autosave(ctx);
     }
 
     /// Saves a change made less than [`config::AUTOSAVE_DELAY`] before closing.
@@ -303,7 +419,7 @@ mod tests {
             start: SerializablePos { x: 10.0, y: 20.0 },
             end: SerializablePos { x: 304.0, y: 234.0 },
         });
-        let mut app = App::with_config(&ctx, config, lang);
+        let mut app = App::with_config(&ctx, config, lang, None);
         app.tab = tab;
         let input = || RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 720.0))),
@@ -322,7 +438,7 @@ mod tests {
         for lang in Lang::ALL {
             for width in [320.0, 400.0, 480.0, 600.0, 900.0] {
                 for scale in [1.0, 1.5, 2.0] {
-                    for tab in [Tab::Home, Tab::Appearance] {
+                    for tab in [Tab::Home, Tab::Hotkeys, Tab::Appearance] {
                         let over = overflow(lang, width, scale, tab);
                         assert!(
                             over <= 1.0,
