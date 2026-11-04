@@ -6,7 +6,7 @@ use eframe::egui::{
     self, vec2, Align2, Color32, CornerRadius, Event, FontId, Frame, Key, MouseWheelUnit, Sense,
     Stroke, StrokeKind, TextureHandle, TextureOptions, Vec2, ViewportBuilder, ViewportCommand,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Screen region magnified by the lupa: `(x, y, width, height)` in physical pixels.
 pub type CaptureRect = (u32, u32, u32, u32);
@@ -54,6 +54,13 @@ pub struct LupaApp {
     pub border_width: f32,
     /// Show the interactive/passthrough badge (state is never shown by colour alone).
     pub show_mode_badge: bool,
+    /// Magnifier name shown in the badge ("Minimapa · Passthrough"); empty = mode only.
+    pub name: String,
+    /// Window title; unique per magnifier so its window can be found and excluded
+    /// from screen capture.
+    pub title: String,
+    /// The border flashes until this moment (after the "select next" hotkey).
+    flash_until: Option<Instant>,
     /// Texts (loading, hover hint, badge).
     pub strings: &'static Strings,
     /// Display scale of the magnifier's monitor, refreshed every frame.
@@ -68,7 +75,18 @@ pub struct LupaApp {
 }
 
 impl LupaApp {
+    /// Title of a standalone magnifier (command-line `lupa` mode).
     pub const TITLE: &'static str = "Lupa";
+
+    /// Unique window title for the magnifier with this id.
+    pub fn title_for(id: u32) -> String {
+        format!("Lupa {id}")
+    }
+
+    /// Makes the border flash briefly, so the player sees which magnifier is selected.
+    pub fn flash(&mut self) {
+        self.flash_until = Some(Instant::now() + Duration::from_millis(1200));
+    }
 
     pub fn new(
         area: CaptureRect,
@@ -86,6 +104,9 @@ impl LupaApp {
             border_colors: BorderPreset::default().colors(),
             border_width: 3.0,
             show_mode_badge: true,
+            name: String::new(),
+            title: Self::TITLE.to_owned(),
+            flash_until: None,
             strings: &i18n::PT,
             pixels_per_point,
             capture: None,
@@ -129,7 +150,7 @@ impl LupaApp {
             None => ViewportBuilder::default(),
         };
         builder
-            .with_title(Self::TITLE)
+            .with_title(self.title.clone())
             .with_inner_size(self.display_size())
             .with_position(self.position)
             .with_decorations(false)
@@ -233,7 +254,7 @@ impl LupaApp {
         let ctx = &ui.ctx().clone();
         self.pixels_per_point = ctx.pixels_per_point();
         if !self.excluded_from_capture {
-            self.excluded_from_capture = exclude_own_window_from_capture(Self::TITLE);
+            self.excluded_from_capture = exclude_own_window_from_capture(&self.title);
         }
         self.handle_input(ctx);
         self.update_texture(ctx);
@@ -274,20 +295,47 @@ impl LupaApp {
                     Stroke::new(self.border_width, color),
                     StrokeKind::Middle,
                 );
+                if let Some(until) = self.flash_until {
+                    let now = Instant::now();
+                    if now < until {
+                        // Thick black/white blinking frame inside the border.
+                        let phase = ((until - now).as_millis() / 200).is_multiple_of(2);
+                        let flash = if phase {
+                            Color32::WHITE
+                        } else {
+                            Color32::BLACK
+                        };
+                        let width = (self.border_width * 2.0).max(6.0);
+                        painter.rect_stroke(
+                            rect.shrink(self.border_width),
+                            CornerRadius::ZERO,
+                            Stroke::new(width, flash),
+                            StrokeKind::Inside,
+                        );
+                        ctx.request_repaint_after(Duration::from_millis(100));
+                    } else {
+                        self.flash_until = None;
+                    }
+                }
 
                 // Badge and hint follow the panel's text size setting.
                 let small = egui::TextStyle::Small.resolve(ui.style());
                 if self.show_mode_badge {
-                    let text = if self.passthrough {
+                    let mode = if self.passthrough {
                         self.strings.badge_passthrough
                     } else {
                         self.strings.badge_interactive
+                    };
+                    let text = if self.name.trim().is_empty() {
+                        mode.to_owned()
+                    } else {
+                        format!("{} · {mode}", self.name.trim())
                     };
                     let inset = self.border_width + 4.0;
                     draw_badge(
                         &painter,
                         rect.min + vec2(inset, inset),
-                        text,
+                        &text,
                         color,
                         small.clone(),
                     );

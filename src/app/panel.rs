@@ -8,25 +8,19 @@
 //! Accessibility: every card and choice is a named group in the accessibility tree,
 //! and symbol-only buttons have spoken names. Colours come from the theme palette.
 
-use super::{App, Tab};
-use area_selector::config::{
-    BorderPreset, ThemeMode, BORDER_WIDTH_RANGE, LUPA_FPS_RANGE, LUPA_ZOOM_RANGE, UI_SCALE_RANGE,
-};
+use super::{lock, App, MagnifierEntry, Tab};
+use area_selector::config::{self, ThemeMode, UI_SCALE_RANGE};
 use area_selector::hotkeys::{self, Action, BindingError};
 use area_selector::i18n::{Lang, Strings};
-use area_selector::lupa::{self, Placement};
 use area_selector::theme::{self, TITLE_SCALE};
-use area_selector::ui_selector;
 use area_selector::widgets::{
     a11y_group, button_width, caption, card, card_sized, chip_button, equal_height_row,
-    fit_slider_width, icon_button, icon_pad, info_box, key_field, primary_button, radio_width,
-    remove_button, row_or_column, section_gap, set_equal_height_row, slider_value_fits,
-    slider_with_caption, swatch, swatch_width, text_width, themed_slider, toggle_switch,
+    icon_button, info_box, key_field, primary_button, radio_width, remove_button, row_or_column,
+    section_gap, set_equal_height_row, text_width, toggle_switch,
 };
 use eframe::egui::*;
 use std::time::Instant;
 
-const ZOOM_STEP: f32 = 0.25;
 const UI_SCALE_STEP: f32 = 0.1;
 
 /// Body font size of the current style (grows with the text-size setting).
@@ -163,281 +157,203 @@ impl App {
             self.onboarding_step = 0;
         }
 
-        let has_area = self.saved_area.is_some();
-        let lupa_open = self.lupa.is_some();
-        let passthrough = self.config.lupa_passthrough;
-        let area_text = match self.saved_area {
-            Some(area) => {
-                let (_, _, w, h) = area.to_rect_px();
-                (s.chip_area)(w, h)
-            }
-            None => s.chip_no_area.to_owned(),
-        };
-        let (lupa_text, lupa_tip) = if lupa_open {
-            (s.chip_lupa_open, s.chip_lupa_open_tip)
+        let total = self.magnifiers.len();
+        let open = self.magnifiers.iter().filter(|e| e.lupa.is_some()).count();
+        let passthrough = self
+            .magnifiers
+            .iter()
+            .filter(|e| lock(&e.settings).passthrough)
+            .count();
+        let count_text = (s.chip_count)(total);
+        let open_text = (s.chip_open_count)(open);
+        let passthrough_text = (s.chip_passthrough_count)(passthrough);
+        let can_add = self.can_add_magnifier();
+        let add_tip = if can_add {
+            self.with_hotkey(s.chip_add_tip, Action::SelectArea)
         } else {
-            (s.chip_lupa_closed, s.chip_lupa_closed_tip)
+            (s.add_magnifier_limit)(config::MAX_MAGNIFIERS)
         };
-        let passthrough_text = if passthrough {
-            s.chip_passthrough_on
-        } else {
-            s.chip_passthrough_off
-        };
-        let area_tip = self.with_hotkey(s.chip_area_tip, Action::SelectArea);
-        let lupa_tip = self.with_hotkey(lupa_tip, Action::ToggleLupa);
-        let passthrough_tip = self.with_hotkey(s.chip_passthrough_tip, Action::TogglePassthrough);
+        let open_tip = self.with_hotkey(s.chip_open_all_tip, Action::ToggleLupa);
+        let passthrough_tip =
+            self.with_hotkey(s.chip_passthrough_all_tip, Action::TogglePassthrough);
+        let any = total > 0;
 
-        let (mut select_area, mut toggle_lupa, mut toggle_passthrough) = (false, false, false);
+        let (mut add, mut toggle_all, mut passthrough_all) = (false, false, false);
         a11y_group(ui, Role::Group, s.status_group, |ui| {
             ui.horizontal_wrapped(|ui| {
-                select_area = chip_button(ui, &area_text, has_area, true, &area_tip).clicked();
-                toggle_lupa =
-                    chip_button(ui, lupa_text, lupa_open, has_area || lupa_open, &lupa_tip)
-                        .clicked();
-                toggle_passthrough =
-                    chip_button(ui, passthrough_text, passthrough, true, &passthrough_tip)
-                        .clicked();
+                add = chip_button(ui, &count_text, any, can_add, &add_tip).clicked();
+                toggle_all = chip_button(ui, &open_text, open > 0, any, &open_tip).clicked();
+                passthrough_all = chip_button(
+                    ui,
+                    &passthrough_text,
+                    passthrough > 0,
+                    any,
+                    &passthrough_tip,
+                )
+                .clicked();
             });
         });
 
-        if select_area {
-            self.open_selector();
+        if add {
+            self.add_magnifier();
         }
-        if toggle_lupa {
-            self.toggle_lupa(ui.ctx());
+        if toggle_all {
+            self.toggle_all_magnifiers(ui.ctx());
         }
-        if toggle_passthrough {
-            self.config.lupa_passthrough = !passthrough;
-        }
-    }
-
-    fn toggle_lupa(&mut self, ctx: &Context) {
-        if self.lupa.is_some() {
-            self.close_lupa();
-        } else {
-            let ctx = ctx.clone();
-            self.open_lupa(&ctx);
+        if passthrough_all {
+            self.toggle_all_passthrough();
         }
     }
 
+    /// The list of magnifiers: compact cards (two per row on wide windows, with equal
+    /// heights), each with Open/Close, passthrough, Settings and Select.
     fn home_tab(&mut self, ui: &mut Ui, s: &'static Strings) {
         let gap = section_gap(ui);
-        if two_columns_fit(ui) {
-            // Side by side: both cards share the taller card's height.
-            let row = Id::unique("home_cards_row");
-            let height = equal_height_row(ui, row);
-            let top = ui.cursor().min.y;
-            let tallest = ui.columns(2, |columns| {
-                let a = self.area_card(&mut columns[0], s, height);
-                let b = self.lupa_card(&mut columns[1], s, height);
-                a.max(b)
-            });
-            set_equal_height_row(ui, row, tallest);
-            #[cfg(test)]
-            {
-                self.card_row = (
-                    ui.cursor().min.y - top - ui.spacing().item_spacing.y,
-                    height,
-                );
-            }
-            let _ = top;
-        } else {
-            self.area_card(ui, s, 0.0);
-            ui.add_space(gap);
-            self.lupa_card(ui, s, 0.0);
-        }
-
-        ui.add_space(gap);
-        card(ui, s.card_view, |ui| {
-            self.zoom_controls(ui, s);
-            ui.add_space(ui.spacing().item_spacing.y * 0.5);
-            let value = format!("{} fps", self.config.lupa_fps);
-            let fps = Slider::new(&mut self.config.lupa_fps, LUPA_FPS_RANGE).suffix(" fps");
-            slider_with_caption(ui, s.fps, &value, "60 fps", fps).on_hover_text(s.fps_tip);
+        let can_add = self.can_add_magnifier();
+        let add_tip = self.with_hotkey(s.add_magnifier_tip, Action::SelectArea);
+        let limit_tip = (s.add_magnifier_limit)(config::MAX_MAGNIFIERS);
+        let needed = text_width(ui, s.magnifiers_title, TextStyle::Body)
+            + button_width(ui, s.add_magnifier)
+            + ui.spacing().item_spacing.x;
+        let mut add = false;
+        row_or_column(ui, needed, |ui| {
+            ui.label(RichText::new(s.magnifiers_title).strong());
+            add = primary_button(ui, can_add, s.add_magnifier)
+                .on_hover_text(add_tip)
+                .on_disabled_hover_text(&limit_tip)
+                .clicked();
         });
-
-        ui.add_space(gap);
-        card(ui, s.position, |ui| {
-            if two_columns_fit(ui) {
-                ui.columns(2, |columns| {
-                    self.position_pad(&mut columns[0], s);
-                    self.advanced_position(&mut columns[1], s);
-                });
-            } else {
-                self.position_pad(ui, s);
-                self.advanced_position(ui, s);
-            }
-        });
-    }
-
-    /// Returns the card's natural height (for equal heights side by side).
-    fn area_card(&mut self, ui: &mut Ui, s: &'static Strings, min_height: f32) -> f32 {
-        card_sized(ui, s.card_area, min_height, |ui| {
-            match self.saved_area {
-                Some(area) => {
-                    let (x, y, w, h) = area.to_rect_px();
-                    ui.label((s.area_info)(w, h, x, y));
-                }
-                None => {
-                    ui.weak(s.no_area_hint);
-                }
-            }
-            let tip = self.with_hotkey(s.select_area_tip, Action::SelectArea);
-            if primary_button(ui, true, s.select_area)
-                .on_hover_text(tip)
-                .clicked()
-            {
-                self.open_selector();
-            }
-        })
-        .1
-    }
-
-    /// Returns the card's natural height (for equal heights side by side).
-    fn lupa_card(&mut self, ui: &mut Ui, s: &'static Strings, min_height: f32) -> f32 {
-        card_sized(ui, s.card_lupa, min_height, |ui| {
-            let open = self.lupa.is_some();
-            let (label, tip) = if open {
-                (s.close_lupa, s.close_lupa_tip)
-            } else {
-                (s.open_lupa, s.open_lupa_tip)
-            };
-            let tip = self.with_hotkey(tip, Action::ToggleLupa);
-            let button = primary_button(ui, open || self.saved_area.is_some(), label)
-                .on_hover_text(tip)
-                .on_disabled_hover_text(s.open_lupa_needs_area_tip);
-            if button.clicked() {
-                self.toggle_lupa(ui.ctx());
-            }
-
-            let passthrough_tip = self.with_hotkey(s.passthrough_tip, Action::TogglePassthrough);
-            toggle_switch(
-                ui,
-                &mut self.config.lupa_passthrough,
-                s.passthrough,
-                s.on,
-                s.off,
-            )
-            .on_hover_text(passthrough_tip);
-        })
-        .1
-    }
-
-    fn zoom_controls(&mut self, ui: &mut Ui, s: &'static Strings) {
-        let (min, max) = (*LUPA_ZOOM_RANGE.start(), *LUPA_ZOOM_RANGE.end());
-        let zoom = &mut self.config.lupa_zoom;
-        let sample = "5.00×";
-        let button = ui.spacing().interact_size.y + ui.spacing().item_spacing.x;
-        fn slider(zoom: &mut f32) -> Slider<'_> {
-            Slider::new(zoom, LUPA_ZOOM_RANGE)
-                .step_by(f64::from(ZOOM_STEP))
-                .fixed_decimals(2)
-                .suffix("×")
+        if add {
+            self.add_magnifier();
         }
-        let minus = |ui: &mut Ui, zoom: &mut f32| {
-            if icon_button(ui, *zoom > min, "−", s.zoom_out_tip).clicked() {
-                *zoom = (*zoom - ZOOM_STEP).max(min);
-            }
-        };
-        let plus = |ui: &mut Ui, zoom: &mut f32| {
-            if icon_button(ui, *zoom < max, "+", s.zoom_in_tip).clicked() {
-                *zoom = (*zoom + ZOOM_STEP).min(max);
-            }
-        };
-
-        // Inline [−] slider [+] when there is room for a usable slider; otherwise the
-        // slider gets its own full-width row and the buttons go below it.
-        if slider_value_fits(ui, 2.0 * button + 80.0, sample) {
-            let label = caption(ui, s.zoom);
-            ui.horizontal(|ui| {
-                minus(ui, zoom);
-                fit_slider_width(ui, button, sample);
-                themed_slider(ui, slider(zoom)).labelled_by(label.id);
-                plus(ui, zoom);
-            });
-        } else {
-            let value = format!("{:.2}×", *zoom);
-            slider_with_caption(ui, s.zoom, &value, sample, slider(zoom));
-            ui.horizontal(|ui| {
-                minus(ui, zoom);
-                plus(ui, zoom);
-            });
+        if !can_add {
+            ui.weak(&limit_tip);
         }
-    }
+        ui.add_space(gap * 0.5);
 
-    /// The five-button positioning pad (corners and centre).
-    fn position_pad(&mut self, ui: &mut Ui, s: &'static Strings) {
-        let ctx = ui.ctx().clone();
-        let screen = ui_selector::screen_size(&ctx);
-        let pad = [
-            [
-                Some((Placement::TopLeft, "↖", s.preset_top_left)),
-                None,
-                Some((Placement::TopRight, "↗", s.preset_top_right)),
-            ],
-            [None, Some((Placement::Center, "◎", s.preset_center)), None],
-            [
-                Some((Placement::BottomLeft, "↙", s.preset_bottom_left)),
-                None,
-                Some((Placement::BottomRight, "↘", s.preset_bottom_right)),
-            ],
-        ];
-        let enabled = self.saved_area.is_some();
-        // Equal square cells at exact positions; buttons shrink (down to 24 pt) so the pad
-        // always fits the width.
-        let gap = ui.spacing().item_spacing.x * 0.5;
-        let size = ((ui.available_width() - 2.0 * gap) / 3.0)
-            .min(ui.spacing().interact_size.y * 1.2)
-            .max(24.0);
-        let cells = pad.map(|row| row.map(|cell| cell.map(|(_, icon, name)| (icon, name))));
-        let clicked = a11y_group(ui, Role::Group, s.position, |ui| {
-            icon_pad(ui, &cells, enabled, size, gap)
-        });
-        if let Some((row, col)) = clicked {
-            if let Some((placement, _, _)) = pad[row][col] {
-                self.place_lupa(&ctx, placement, screen);
-            }
-        }
-    }
-
-    /// Collapsed by default: exact X/Y and the drag/zoom tip.
-    fn advanced_position(&mut self, ui: &mut Ui, s: &'static Strings) {
-        let screen = ui_selector::screen_size(ui.ctx());
-        CollapsingHeader::new(s.advanced)
-            .id_salt("advanced_position")
-            .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    let x = ui.label(s.pos_x);
-                    ui.add(
-                        DragValue::new(&mut self.config.lupa_pos_x)
-                            .range(0.0..=screen.x)
-                            .speed(1.0),
-                    )
-                    .labelled_by(x.id);
-                    let y = ui.label(s.pos_y);
-                    ui.add(
-                        DragValue::new(&mut self.config.lupa_pos_y)
-                            .range(0.0..=screen.y)
-                            .speed(1.0),
-                    )
-                    .labelled_by(y.id);
-                });
-                info_box(ui, s.lupa_drag_tip);
-            });
-    }
-
-    fn place_lupa(&mut self, ctx: &Context, placement: Placement, screen: Vec2) {
-        let Some(area) = self.saved_area else {
+        if self.magnifiers.is_empty() {
+            info_box(ui, s.no_magnifiers);
             return;
+        }
+
+        let ids: Vec<u32> = self.magnifiers.iter().map(MagnifierEntry::id).collect();
+        let selected = self.selected_index().map(|i| ids[i]);
+        if two_columns_fit(ui) {
+            for (row_index, pair) in ids.chunks(2).enumerate() {
+                if row_index > 0 {
+                    ui.add_space(gap);
+                }
+                // Side by side: both cards share the taller card's height.
+                let row = Id::unique(("magnifier_row", row_index));
+                let height = equal_height_row(ui, row);
+                let top = ui.cursor().min.y;
+                let tallest = ui.columns(2, |columns| {
+                    let mut tallest = 0.0_f32;
+                    for (column, &id) in columns.iter_mut().zip(pair) {
+                        let h = self.magnifier_card(column, s, id, selected == Some(id), height);
+                        tallest = tallest.max(h);
+                    }
+                    tallest
+                });
+                set_equal_height_row(ui, row, tallest);
+                #[cfg(test)]
+                if row_index == 0 && pair.len() == 2 {
+                    self.card_row = (
+                        ui.cursor().min.y - top - ui.spacing().item_spacing.y,
+                        height,
+                    );
+                }
+                let _ = top;
+            }
+        } else {
+            for (i, &id) in ids.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(gap);
+                }
+                self.magnifier_card(ui, s, id, selected == Some(id), 0.0);
+            }
+        }
+    }
+
+    /// One magnifier in the Home list. Returns the card's natural height.
+    fn magnifier_card(
+        &mut self,
+        ui: &mut Ui,
+        s: &'static Strings,
+        id: u32,
+        selected: bool,
+        min_height: f32,
+    ) -> f32 {
+        let Some(index) = self.index_of(id) else {
+            return 0.0;
         };
-        let size = lupa::display_size(
-            area.to_rect_px(),
-            self.config.lupa_zoom,
-            ctx.pixels_per_point(),
-        );
-        let [x, y] = placement.position(screen, size);
-        self.config.lupa_pos_x = x;
-        self.config.lupa_pos_y = y;
+        let (name, area) = {
+            let settings = lock(&self.magnifiers[index].settings);
+            (settings.name.clone(), settings.area)
+        };
+        let open = self.magnifiers[index].lupa.is_some();
+        let toggle_tip = if open {
+            s.close_lupa_tip
+        } else {
+            s.open_lupa_tip
+        };
+        let select_tip = self.with_hotkey(s.select_tip, Action::CycleSelection);
+        let shared = self.magnifiers[index].settings.clone();
+        let (mut toggle, mut settings_clicked, mut select) = (false, false, false);
+        let height = ui
+            .push_id(("magnifier_card", id), |ui| {
+                card_sized(ui, &name, min_height, |ui| {
+                    match area {
+                        Some(area) => {
+                            let (_, _, w, h) = area.to_rect_px();
+                            ui.weak((s.chip_area)(w, h));
+                        }
+                        None => {
+                            ui.weak(s.no_area_hint);
+                        }
+                    }
+                    let label = if open { s.close_lupa } else { s.open_lupa };
+                    let needed = button_width(ui, label)
+                        + button_width(ui, s.open_settings)
+                        + ui.spacing().item_spacing.x;
+                    row_or_column(ui, needed, |ui| {
+                        toggle = primary_button(ui, open || area.is_some(), label)
+                            .on_hover_text(toggle_tip)
+                            .on_disabled_hover_text(s.open_lupa_needs_area_tip)
+                            .clicked();
+                        settings_clicked = ui
+                            .button(s.open_settings)
+                            .on_hover_text(s.open_settings_tip)
+                            .clicked();
+                    });
+                    {
+                        let mut settings = lock(&shared);
+                        toggle_switch(ui, &mut settings.passthrough, s.passthrough, s.on, s.off)
+                            .on_hover_text(s.passthrough_tip);
+                    }
+                    if selected {
+                        ui.label(RichText::new(s.selected_label).strong());
+                    } else {
+                        select = ui
+                            .button(s.select_label)
+                            .on_hover_text(select_tip)
+                            .clicked();
+                    }
+                })
+                .1
+            })
+            .inner;
+
+        if toggle {
+            self.toggle_magnifier(ui.ctx(), index);
+        }
+        if settings_clicked {
+            self.open_settings_window(index);
+        }
+        if select {
+            self.select_magnifier(id);
+        }
+        height
     }
 
     /// `"{tip} ({hotkey})"` when the action has a hotkey.
@@ -677,44 +593,6 @@ impl App {
                 s.off,
             )
             .on_hover_text(s.close_to_tray_tip);
-        });
-
-        ui.add_space(gap);
-        // Magnifier border: its own colour presets, independent of the panel theme.
-        card(ui, s.card_lupa_look, |ui| {
-            let appearance = &mut self.config.appearance;
-            a11y_group(ui, Role::RadioGroup, s.border_colors, |ui| {
-                caption(ui, s.border_colors);
-                for preset in BorderPreset::ALL {
-                    let name = match preset {
-                        BorderPreset::GreenGrey => s.border_green_grey,
-                        BorderPreset::BlueOrange => s.border_blue_orange,
-                        BorderPreset::YellowMagenta => s.border_yellow_magenta,
-                    };
-                    ui.radio_value(&mut appearance.border_preset, preset, name);
-                }
-            });
-            toggle_switch(
-                ui,
-                &mut appearance.show_mode_badge,
-                s.show_badge,
-                s.on,
-                s.off,
-            )
-            .on_hover_text(s.show_badge_tip);
-            let (interactive, passthrough) = appearance.border_preset.colors();
-            let needed =
-                swatch_width(ui, s.border_interactive) + swatch_width(ui, s.border_passthrough);
-            row_or_column(ui, needed, |ui| {
-                swatch(ui, interactive, s.border_interactive);
-                swatch(ui, passthrough, s.border_passthrough);
-            });
-
-            let value = format!("{:.0} px", appearance.border_width);
-            let width = Slider::new(&mut appearance.border_width, BORDER_WIDTH_RANGE)
-                .step_by(1.0)
-                .suffix(" px");
-            slider_with_caption(ui, s.border_width, &value, "10 px", width);
         });
     }
 

@@ -21,15 +21,18 @@ pub enum Action {
     ZoomIn,
     ZoomOut,
     ShowPanel,
+    /// Selects the next magnifier (the target of zoom / select area).
+    CycleSelection,
 }
 
 impl Action {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::TogglePassthrough,
         Self::ToggleLupa,
         Self::SelectArea,
         Self::ZoomIn,
         Self::ZoomOut,
+        Self::CycleSelection,
         Self::ShowPanel,
     ];
 
@@ -44,6 +47,7 @@ impl Action {
             Self::ZoomIn => "control+alt+PageUp",
             Self::ZoomOut => "control+alt+PageDown",
             Self::ShowPanel => "control+alt+KeyH",
+            Self::CycleSelection => "control+alt+KeyN",
         }
     }
 }

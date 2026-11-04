@@ -5,7 +5,7 @@ mod app;
 
 use app::App;
 use area_selector::cli::{self, LupaArgs, Mode};
-use area_selector::config::AppConfig;
+use area_selector::config::{AppConfig, MagnifierSettings};
 use area_selector::i18n::{self, Lang, Strings};
 use area_selector::lupa::{LupaApp, LupaOutcome};
 use area_selector::ui_selector::{self, AreaSelector, SelectorOutcome};
@@ -72,7 +72,7 @@ fn run_selector(cfg: AppConfig, s: &'static Strings) -> eframe::Result {
                 SelectorOutcome::Selected(area) => {
                     let s = self.1;
                     let (x, y, w, h) = area.to_rect_px();
-                    match config::save_area(&area) {
+                    match config::save_area(&area, s.magnifier_default_name) {
                         Ok(()) => println!("{}", (s.cli_area_saved)(w, h, x, y)),
                         Err(err) => eprintln!("{}", (s.cli_save_failed)(&err.to_string())),
                     }
@@ -111,27 +111,35 @@ fn run_lupa(args: LupaArgs, mut cfg: AppConfig, s: &'static Strings) -> eframe::
         }
     }
 
+    // The selected magnifier's saved settings (defaults when there is none).
     if let Some([x, y]) = args.position {
-        cfg.lupa_pos_x = x;
-        cfg.lupa_pos_y = y;
+        if let Some(magnifier) = cfg.selected_magnifier_mut() {
+            magnifier.pos_x = x;
+            magnifier.pos_y = y;
+        }
         match config::save_config(&cfg) {
             Ok(()) => println!("{}", (s.cli_position_saved)(x, y)),
             Err(err) => eprintln!("{}", (s.cli_save_failed)(&err.to_string())),
         }
     }
 
+    let settings = cfg
+        .selected_magnifier_mut()
+        .cloned()
+        .unwrap_or_else(|| MagnifierSettings::new(1, format!("{} 1", s.magnifier_default_name)));
     let mut lupa = LupaApp::new(
         (args.x, args.y, args.w, args.h),
-        args.zoom.unwrap_or(cfg.lupa_zoom),
-        [cfg.lupa_pos_x, cfg.lupa_pos_y],
+        args.zoom.unwrap_or(settings.zoom),
+        [settings.pos_x, settings.pos_y],
         args.passthrough,
         system_pixels_per_point(),
     );
-    lupa.frame_interval = cfg.lupa_frame_interval();
-    lupa.border_colors = cfg.appearance.border_preset.colors();
-    lupa.border_width = cfg.appearance.border_width;
+    lupa.frame_interval = settings.frame_interval();
+    lupa.border_colors = settings.border_preset.colors();
+    lupa.border_width = settings.border_width;
     lupa.strings = s;
-    lupa.show_mode_badge = cfg.appearance.show_mode_badge;
+    lupa.show_mode_badge = settings.show_badge;
+    lupa.name = settings.name;
     let options = eframe::NativeOptions {
         viewport: lupa.viewport_builder(),
         ..Default::default()

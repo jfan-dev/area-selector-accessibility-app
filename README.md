@@ -36,11 +36,12 @@ A short guide opens the first time; reopen it any time with the **?** button nex
 ### The panel
 | Part | What it does |
 |------|--------------|
-| **Status chips** (Area · Magnifier · Passthrough) | Show the current state and are also shortcuts: click *Area* to select a new one, *Magnifier* to open/close it, *Passthrough* to toggle it. |
-| **Home** tab | *Select area*, open/close the magnifier, the **passthrough switch**, zoom (− / slider / +), refresh rate (FPS) and a **3×3 positioning pad** (corners and centre). Exact X/Y values are under *Advanced*. |
+| **Status chips** (count · open · passthrough) | Summarise your magnifiers and are also shortcuts: click the count to add one, *open* to show/hide all, *passthrough* to toggle it on all. |
+| **Home** tab | The list of your magnifiers (up to 8, shown at the same time). Each card has **Open/Close**, a **passthrough switch**, **⚙ Settings** and **Select** (the selected one is the target of the zoom and select-area hotkeys). **+ Add magnifier** asks you to select an area and opens the new magnifier. |
+| **Settings window** (one per magnifier) | Name, *Select area*, open/close, passthrough, zoom (− / slider / +), refresh rate (FPS), a **positioning pad** (corners and centre, exact X/Y under *Advanced*), the border (colour presets incl. a colour-blind-friendly one, thickness, name badge) and **Delete**. Several can be open at once. |
 | **Hotkeys** tab | Change, remove or restore the global hotkeys (see below). Warns when a combination is used by another program or twice. |
-| **Appearance** tab | Theme (same as Windows / light / dark) plus a **high contrast** switch — four colour schemes in total —, **text size 100–200 %**, language, close-to-tray, and the magnifier border (colour presets incl. a colour-blind-friendly one, thickness, mode badge). |
-| **Quit** | Closes the app and the magnifier. |
+| **Appearance** tab | Theme (same as Windows / light / dark) plus a **high contrast** switch — four colour schemes in total —, **text size 100–200 %**, language and close-to-tray. |
+| **Quit** | Closes the app and the magnifiers. Magnifiers left open reopen next time. |
 
 Every control has a tooltip and can be reached with **Tab** (Space/Enter activates it); screen readers such as Windows Narrator announce the groups and controls.
 
@@ -49,20 +50,22 @@ Every control has a tooltip and can be reached with **Tab** (Space/Enter activat
 
 ### The magnifier
 - **Drag it** to move it; **mouse wheel** or **+ / −** to zoom; **arrow keys** move it (Shift = 10 px); **P** turns passthrough on; **ESC** closes it.
-- Green border + *Interactive* badge = you can drag/zoom it; grey border + *Passthrough* badge = clicks go through to the game.
+- Green border + *Interactive* badge = you can drag/zoom it; grey border + *Passthrough* badge = clicks go through to the game. The badge also shows the magnifier's name.
+- Magnifiers never magnify each other, even when they overlap.
 - It keeps running while the panel is minimized or in the tray. Selecting a new area updates it right away.
 
 ### Global hotkeys (work inside games)
 | Default | Action |
 |---------|--------|
-| **Ctrl+Alt+P** | Passthrough on/off |
-| **Ctrl+Alt+L** | Open/close the magnifier |
-| **Ctrl+Alt+A** | Select area |
-| **Ctrl+Alt+PageUp / PageDown** | Zoom in / out |
-| **Ctrl+Alt+H** | Show the panel |
+| **Ctrl+Alt+P** | Passthrough on/off (all magnifiers) |
+| **Ctrl+Alt+L** | Show/hide all magnifiers |
+| **Ctrl+Alt+A** | Select area (selected magnifier) |
+| **Ctrl+Alt+PageUp / PageDown** | Zoom in / out (selected magnifier) |
+| **Ctrl+Alt+N** | Select the next magnifier (its border flashes) |
+| **Ctrl+Alt+H** | Show/hide the panel (minimizes it when it is in front) |
 
 ### System tray
-Closing the panel keeps the app running in the system tray (the first time, a short message explains it — turn it off under *Appearance → Window*). Click the tray icon to open the panel; right-click for a menu with the magnifier, passthrough, area selection and Quit.
+Closing the panel keeps the app running in the system tray (the first time, a short message explains it — turn it off under *Appearance → Window*). Click the tray icon to open the panel; right-click for a menu with each magnifier (check mark = open), passthrough for all, and Quit.
 
 > **Tip:** play in windowed or borderless fullscreen mode — in exclusive fullscreen, Windows hides overlay windows like the magnifier.
 
