@@ -118,6 +118,22 @@ enum Tab {
     Appearance,
 }
 
+/// Where the text-size Apply button was when clicked, so the panel can scroll it back
+/// to the same screen position once the new size is laid out.
+#[derive(Clone, Copy)]
+struct ScaleAnchor {
+    /// Screen top of the button when clicked.
+    top: f32,
+    /// Screen top of the button this frame (its id changes when the layout reflows).
+    now: Option<f32>,
+    /// A scroll was just requested; skip a frame so it shows before measuring again.
+    settling: bool,
+    /// Body font size when clicked (a different size = new style is laid out).
+    body_size: f32,
+    /// Frames left to wait for the new style and scroll (a safety limit).
+    frames_left: u8,
+}
+
 /// Main control panel. Owns the magnifiers, their settings windows and the selector,
 /// which are all child viewports of this same process.
 pub struct App {
@@ -139,6 +155,10 @@ pub struct App {
     applied_appearance: Option<Appearance>,
     /// Keyboard focus last frame, to scroll newly focused controls into view.
     last_focus: Option<Id>,
+    /// Text size chosen with − / + but not applied yet (shown only in the preview).
+    pending_ui_scale: Option<f32>,
+    /// Set by the text-size Apply button to scroll it back under the mouse.
+    scale_anchor: Option<ScaleAnchor>,
     /// System-wide hotkeys (`None` in tests, or if Windows refused to create them).
     hotkeys: Option<HotkeyService>,
     /// Bindings currently registered with Windows (`None` = must re-register).
@@ -210,6 +230,8 @@ impl App {
             system_lang,
             applied_appearance: None,
             last_focus: None,
+            pending_ui_scale: None,
+            scale_anchor: None,
             hotkeys,
             registered_bindings: None,
             recording: None,
@@ -888,8 +910,9 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use area_selector::config::{BorderPreset, HomeView};
+    use area_selector::config::{BorderPreset, HomeView, UI_SCALE_RANGE};
     use area_selector::model::{Area, SerializablePos};
+    use egui_kittest::kittest::Queryable;
 
     fn area() -> Area {
         Area {
@@ -943,6 +966,10 @@ mod tests {
         config.appearance.high_contrast = high_contrast;
         let mut app = App::with_config(&ctx, config, lang, None, None);
         app.tab = tab;
+        if tab == Tab::Appearance {
+            // The largest preview, with the "current" note and enabled buttons.
+            app.pending_ui_scale = Some(*UI_SCALE_RANGE.end());
+        }
         let input = || RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 720.0))),
             ..Default::default()
@@ -1399,5 +1426,83 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Text-size harness on the Appearance tab (English labels).
+    fn text_size_harness(height: f32) -> egui_kittest::Harness<'static, App> {
+        let mut app = App::with_config(
+            &egui::Context::default(),
+            test_config(1),
+            Lang::En,
+            None,
+            None,
+        );
+        app.tab = Tab::Appearance;
+        app.applied_appearance = None; // apply to the harness context below
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(vec2(600.0, height))
+            .build_ui_state(
+                |ui, app: &mut App| {
+                    app.apply_theme(ui.ctx());
+                    app.panel_ui(ui);
+                },
+                app,
+            );
+        harness.run_steps(4);
+        harness
+    }
+
+    fn body_font(harness: &egui_kittest::Harness<'_, App>) -> f32 {
+        TextStyle::Body
+            .resolve(&harness.ctx.style_of(harness.ctx.theme()))
+            .size
+    }
+
+    /// − / + only change the preview; the panel resizes on Apply, and Reset drops the
+    /// previewed size.
+    #[test]
+    fn text_size_changes_only_on_apply() {
+        let mut harness = text_size_harness(820.0);
+        let normal = body_font(&harness);
+        for _ in 0..2 {
+            harness.get_by_label("Increase text size").click();
+            harness.run_steps(2);
+        }
+        assert_eq!(harness.state().pending_ui_scale, Some(1.2));
+        assert_eq!(harness.state().config.appearance.ui_scale, 1.0);
+        assert_eq!(body_font(&harness), normal, "the panel must not resize yet");
+
+        harness.get_by_label("Apply").click();
+        harness.run_steps(3);
+        assert_eq!(harness.state().config.appearance.ui_scale, 1.2);
+        assert!((body_font(&harness) - normal * 1.2).abs() < 0.01);
+
+        harness.get_by_label("Increase text size").click();
+        harness.run_steps(2);
+        harness.get_by_label("Reset").click();
+        harness.run_steps(2);
+        assert_eq!(harness.state().pending_ui_scale, Some(1.2));
+        assert_eq!(harness.state().config.appearance.ui_scale, 1.2);
+    }
+
+    /// After Apply the panel scrolls so the Apply button is back where it was (under
+    /// the mouse), even though the larger text pushes it far down.
+    #[test]
+    fn apply_keeps_text_size_control_in_place() {
+        let mut harness = text_size_harness(820.0);
+        while harness.state().pending_ui_scale != Some(*UI_SCALE_RANGE.end()) {
+            harness.get_by_label("Increase text size").click();
+            harness.run_steps(2);
+        }
+        let before = harness.get_by_label("Apply").rect().top();
+        harness.get_by_label("Apply").click();
+        harness.run_steps(8);
+        assert_eq!(harness.state().config.appearance.ui_scale, 2.0);
+        let after = harness.get_by_label("Apply").rect().top();
+        assert!(
+            (after - before).abs() <= 1.0,
+            "Apply moved from {before:.0} to {after:.0}"
+        );
+        assert!(harness.state().scale_anchor.is_none());
     }
 }

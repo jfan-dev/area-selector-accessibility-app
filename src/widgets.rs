@@ -183,6 +183,22 @@ pub fn info_box(ui: &mut Ui, text: &str) {
         });
 }
 
+/// Sample text at a given font size, framed like [`info_box`] (text-size preview).
+pub fn text_preview(ui: &mut Ui, text: &str, size: f32) -> Response {
+    let p = theme::palette_of(ui.ctx());
+    let margin = (ui.spacing().item_spacing.x) as i8;
+    Frame::NONE
+        .fill(p.surface2)
+        .stroke(Stroke::new(p.border_width, p.border))
+        .corner_radius(p.corner_radius)
+        .inner_margin(Margin::same(margin))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(text).size(size));
+        })
+        .response
+}
+
 /// Read-only field showing a keyboard shortcut. `highlighted` = recording.
 pub fn key_field(ui: &mut Ui, text: &str, highlighted: bool, min_width: f32) -> Response {
     let p = theme::palette_of(ui.ctx());

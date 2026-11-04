@@ -16,12 +16,17 @@ use area_selector::theme::{self, TITLE_SCALE};
 use area_selector::widgets::{
     a11y_group, button_width, caption, card, card_sized, chip_button, equal_height_row,
     icon_button, info_box, key_field, primary_button, radio_width, remove_button, row_or_column,
-    section_gap, set_equal_height_row, text_width, toggle_switch,
+    section_gap, set_equal_height_row, text_preview, text_width, toggle_switch,
 };
 use eframe::egui::*;
 use std::time::Instant;
 
 const UI_SCALE_STEP: f32 = 0.1;
+
+/// Clamps a text size to the allowed range, rounded to whole 10 % steps.
+fn step_scale(scale: f32) -> f32 {
+    (scale.clamp(*UI_SCALE_RANGE.start(), *UI_SCALE_RANGE.end()) * 10.0).round() / 10.0
+}
 
 /// Body font size of the current style (grows with the text-size setting).
 fn body_size(ui: &Ui) -> f32 {
@@ -67,6 +72,7 @@ impl App {
                     Tab::Hotkeys => self.hotkeys_tab(ui, s),
                     Tab::Appearance => self.appearance_tab(ui, s),
                 }
+                self.keep_scale_control_in_place(ui);
                 self.scroll_focus_into_view(ui);
                 #[cfg(test)]
                 {
@@ -104,7 +110,46 @@ impl App {
         if self.tab != Tab::Hotkeys {
             self.recording = None;
         }
+        if self.tab != Tab::Appearance {
+            // A text size that was only previewed is dropped when leaving the tab.
+            self.pending_ui_scale = None;
+        }
         ui.separator();
+    }
+
+    /// After Apply changes the text size, scrolls so the Apply button is back at the
+    /// same screen height (under the mouse) instead of wherever the reflow put it.
+    fn keep_scale_control_in_place(&mut self, ui: &mut Ui) {
+        let Some(anchor) = &mut self.scale_anchor else {
+            return;
+        };
+        if anchor.frames_left == 0 {
+            self.scale_anchor = None;
+            return;
+        }
+        anchor.frames_left -= 1;
+        ui.ctx().request_repaint();
+        // The new style reaches the layout a frame or two after the click, and a scroll
+        // shows in the layout only a frame after the next one: measuring sooner would
+        // add the same correction twice.
+        if (body_size(ui) - anchor.body_size).abs() < 0.01 || std::mem::take(&mut anchor.settling) {
+            anchor.now = None;
+            return;
+        }
+        // egui limits a scroll to the content height it measured last frame (still the
+        // old, shorter one), so keep correcting until the button is back in place.
+        match anchor.now.take() {
+            Some(now) if (anchor.top - now).abs() > 0.5 => {
+                // No animation: an animated scroll would still be moving next frame and
+                // the correction would be added twice.
+                ui.scroll_with_delta_animation(
+                    vec2(0.0, anchor.top - now),
+                    style::ScrollAnimation::none(),
+                );
+                anchor.settling = true;
+            }
+            _ => self.scale_anchor = None,
+        }
     }
 
     /// egui moves keyboard focus with Tab but doesn't scroll to it; do that here so the
@@ -748,21 +793,59 @@ impl App {
             )
             .on_hover_text(s.high_contrast_tip);
 
-            // Step buttons instead of a slider: resizing the text while dragging a
-            // slider would move the slider under the mouse.
+            // Step buttons instead of a slider, and − / + only change a preview: the
+            // panel resizes once, on Apply, and then scrolls the control back under the
+            // mouse (see `keep_scale_control_in_place`).
+            let current = appearance.ui_scale;
+            let pending = self.pending_ui_scale.get_or_insert(current);
             a11y_group(ui, Role::Group, s.ui_scale, |ui| {
                 caption(ui, s.ui_scale).on_hover_text(s.ui_scale_tip);
                 let (min, max) = (*UI_SCALE_RANGE.start(), *UI_SCALE_RANGE.end());
                 let button = ui.spacing().interact_size.y + ui.spacing().item_spacing.x;
                 let needed = 2.0 * button + text_width(ui, "200%", TextStyle::Body);
                 row_or_column(ui, needed, |ui| {
-                    let scale = &mut appearance.ui_scale;
-                    if icon_button(ui, *scale > min + 0.001, "−", s.ui_scale_decrease).clicked() {
-                        *scale = ((*scale - UI_SCALE_STEP).max(min) * 10.0).round() / 10.0;
+                    if icon_button(ui, *pending > min + 0.001, "−", s.ui_scale_decrease).clicked()
+                    {
+                        *pending = step_scale(*pending - UI_SCALE_STEP);
                     }
-                    ui.label(RichText::new(format!("{:.0}%", *scale * 100.0)).strong());
-                    if icon_button(ui, *scale < max - 0.001, "+", s.ui_scale_increase).clicked() {
-                        *scale = ((*scale + UI_SCALE_STEP).min(max) * 10.0).round() / 10.0;
+                    ui.label(RichText::new(format!("{:.0}%", *pending * 100.0)).strong());
+                    if icon_button(ui, *pending < max - 0.001, "+", s.ui_scale_increase).clicked() {
+                        *pending = step_scale(*pending + UI_SCALE_STEP);
+                    }
+                });
+                let changed = (*pending - current).abs() > 0.001;
+                if changed {
+                    let now = format!("{:.0}%", current * 100.0);
+                    ui.label(RichText::new(s.ui_scale_current.replace("{}", &now)).small());
+                }
+                let size = body_size(ui) * *pending / current.max(0.1);
+                text_preview(ui, s.ui_scale_preview, size);
+                let needed = button_width(ui, s.ui_scale_apply)
+                    + button_width(ui, s.ui_scale_reset)
+                    + ui.spacing().item_spacing.x;
+                row_or_column(ui, needed, |ui| {
+                    let apply = primary_button(ui, changed, s.ui_scale_apply);
+                    if let Some(anchor) = &mut self.scale_anchor {
+                        // Its id changes when the layout reflows, so report the position.
+                        anchor.now = Some(apply.rect.top());
+                    }
+                    if apply.clicked() {
+                        appearance.ui_scale = *pending;
+                        // Keep focus here so keyboard users stay on the control too.
+                        apply.request_focus();
+                        self.scale_anchor = Some(super::ScaleAnchor {
+                            top: apply.rect.top(),
+                            now: None,
+                            settling: false,
+                            body_size: body_size(ui),
+                            frames_left: 8,
+                        });
+                    }
+                    if ui
+                        .add_enabled(changed, Button::new(s.ui_scale_reset))
+                        .clicked()
+                    {
+                        *pending = current;
                     }
                 });
             });
