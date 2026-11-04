@@ -9,7 +9,7 @@
 //! and symbol-only buttons have spoken names. Colours come from the theme palette.
 
 use super::{lock, App, MagnifierEntry, Tab};
-use area_selector::config::{self, ThemeMode, UI_SCALE_RANGE};
+use area_selector::config::{self, HomeView, ThemeMode, UI_SCALE_RANGE};
 use area_selector::hotkeys::{self, Action, BindingError};
 use area_selector::i18n::{Lang, Strings};
 use area_selector::theme::{self, TITLE_SCALE};
@@ -212,17 +212,30 @@ impl App {
         let can_add = self.can_add_magnifier();
         let add_tip = self.with_hotkey(s.add_magnifier_tip, Action::SelectArea);
         let limit_tip = (s.add_magnifier_limit)(config::MAX_MAGNIFIERS);
+        let spacing = ui.spacing().item_spacing.x;
+        let toggle_width = button_width(ui, s.view_cards) + button_width(ui, s.view_list);
         let needed = text_width(ui, s.magnifiers_title, TextStyle::Body)
+            + toggle_width
             + button_width(ui, s.add_magnifier)
-            + ui.spacing().item_spacing.x;
+            + 2.0 * spacing;
         let mut add = false;
+        let mut view = self.config.home_view;
         row_or_column(ui, needed, |ui| {
             ui.label(RichText::new(s.magnifiers_title).strong());
+            a11y_group(ui, Role::RadioGroup, s.view_group, |ui| {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut view, HomeView::Cards, s.view_cards)
+                        .on_hover_text(s.view_cards_tip);
+                    ui.selectable_value(&mut view, HomeView::List, s.view_list)
+                        .on_hover_text(s.view_list_tip);
+                });
+            });
             add = primary_button(ui, can_add, s.add_magnifier)
                 .on_hover_text(add_tip)
                 .on_disabled_hover_text(&limit_tip)
                 .clicked();
         });
+        self.config.home_view = view;
         if add {
             self.add_magnifier();
         }
@@ -238,7 +251,9 @@ impl App {
 
         let ids: Vec<u32> = self.magnifiers.iter().map(MagnifierEntry::id).collect();
         let selected = self.selected_index().map(|i| ids[i]);
-        if two_columns_fit(ui) {
+        if view == HomeView::List {
+            self.magnifier_list(ui, s, &ids, selected);
+        } else if two_columns_fit(ui) {
             for (row_index, pair) in ids.chunks(2).enumerate() {
                 if row_index > 0 {
                     ui.add_space(gap);
@@ -273,6 +288,197 @@ impl App {
                 self.magnifier_card(ui, s, id, selected == Some(id), 0.0);
             }
         }
+    }
+
+    /// The magnifiers as one framed list, one row each: name, area, Open/Close,
+    /// Settings, Select and passthrough. On wide windows each row is a single line with
+    /// the columns lined up across rows; on narrower ones the controls go below the name
+    /// (on one line while they fit, else the switch gets its own line).
+    /// The controls come in the same order either way, so Tab moves through them alike.
+    fn magnifier_list(
+        &mut self,
+        ui: &mut Ui,
+        s: &'static Strings,
+        ids: &[u32],
+        selected: Option<u32>,
+    ) {
+        let rows: Vec<ListRow> = ids
+            .iter()
+            .filter_map(|&id| {
+                let entry = &self.magnifiers[self.index_of(id)?];
+                let settings = lock(&entry.settings);
+                let area = match settings.area {
+                    Some(area) => {
+                        let (_, _, w, h) = area.to_rect_px();
+                        (s.chip_area)(w, h)
+                    }
+                    None => s.chip_no_area.to_owned(),
+                };
+                Some(ListRow {
+                    id,
+                    name: settings.name.clone(),
+                    area,
+                    has_area: settings.area.is_some(),
+                    open: entry.lupa.is_some(),
+                    selected: selected == Some(id),
+                })
+            })
+            .collect();
+
+        let columns = ListColumns::measure(ui, s, &rows);
+        let p = theme::palette_of(ui.ctx());
+        let mut clicked = None;
+        Frame::NONE
+            .fill(p.surface)
+            .stroke(Stroke::new(p.border_width, p.border))
+            .corner_radius(p.corner_radius)
+            .inner_margin(Margin::same(p.border_width as i8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let inner = ui.available_width() - 2.0 * columns.margin;
+                let layout = if columns.total <= inner {
+                    ListLayout::OneLine
+                } else if columns.buttons + columns.switch <= inner {
+                    ListLayout::TwoLines
+                } else {
+                    ListLayout::Stacked
+                };
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (row_index, row) in rows.iter().enumerate() {
+                    if row_index > 0 {
+                        ui.add(Separator::default().spacing(0.0));
+                    }
+                    let fill = if row.selected {
+                        ui.visuals().selection.bg_fill.gamma_multiply(0.35)
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+                    ui.push_id(("magnifier_row", row.id), |ui| {
+                        Frame::NONE
+                            .fill(fill)
+                            .inner_margin(Margin::same(columns.margin as i8))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.spacing_mut().item_spacing.y = columns.spacing * 0.5;
+                                a11y_group(ui, Role::Group, &row.name, |ui| {
+                                    if let Some(action) =
+                                        self.list_row(ui, s, row, &columns, layout)
+                                    {
+                                        clicked = Some((row.id, action));
+                                    }
+                                });
+                            });
+                    });
+                }
+            });
+
+        let Some((id, action)) = clicked else {
+            return;
+        };
+        match (action, self.index_of(id)) {
+            (RowAction::Toggle, Some(index)) => self.toggle_magnifier(ui.ctx(), index),
+            (RowAction::Settings, Some(index)) => self.open_settings_window(index),
+            (RowAction::Select, _) => self.select_magnifier(id),
+            (_, None) => {}
+        }
+    }
+
+    /// The contents of one row of [`Self::magnifier_list`].
+    fn list_row(
+        &mut self,
+        ui: &mut Ui,
+        s: &'static Strings,
+        row: &ListRow,
+        columns: &ListColumns,
+        layout: ListLayout,
+    ) -> Option<RowAction> {
+        // Pads the widget just added to `width`, so the next column starts aligned
+        // (only where the columns share a line).
+        let pad = |ui: &mut Ui, response: &Response, width: f32, aligned: bool| {
+            if aligned {
+                ui.add_space((width - response.rect.width() - columns.spacing).max(0.0));
+            }
+        };
+        let one_line = layout == ListLayout::OneLine;
+        let controls_line = layout != ListLayout::Stacked;
+        let name_and_area = |ui: &mut Ui| {
+            let r = ui.label(RichText::new(&row.name).strong());
+            pad(ui, &r, columns.name, one_line);
+            let mut r = ui.weak(&row.area);
+            if !row.has_area {
+                r = r.on_hover_text(s.no_area_hint);
+            }
+            pad(ui, &r, columns.area, one_line);
+        };
+        let mut action = None;
+        let open_button = |ui: &mut Ui| {
+            let (label, tip) = if row.open {
+                (s.close_lupa, s.close_lupa_tip)
+            } else {
+                (s.open_lupa, s.open_lupa_tip)
+            };
+            let r = primary_button(ui, row.open || row.has_area, label)
+                .on_hover_text(tip)
+                .on_disabled_hover_text(s.open_lupa_needs_area_tip);
+            pad(ui, &r, columns.open, controls_line);
+            r.clicked()
+        };
+        let select_tip = self.with_hotkey(s.select_tip, Action::CycleSelection);
+        let settings_and_select = |ui: &mut Ui| {
+            let settings = icon_button(ui, true, "⚙", s.open_settings_tip).clicked();
+            let r = if row.selected {
+                ui.label(RichText::new(s.selected_label).strong())
+            } else {
+                ui.button(s.select_label).on_hover_text(&select_tip)
+            };
+            pad(ui, &r, columns.select, controls_line);
+            (settings, !row.selected && r.clicked())
+        };
+        let mut buttons = |ui: &mut Ui| {
+            let toggle = open_button(ui);
+            let (settings, select) = ui.horizontal(settings_and_select).inner;
+            action = if toggle {
+                Some(RowAction::Toggle)
+            } else if settings {
+                Some(RowAction::Settings)
+            } else if select {
+                Some(RowAction::Select)
+            } else {
+                None
+            };
+        };
+        let shared = self
+            .index_of(row.id)
+            .map(|index| self.magnifiers[index].settings.clone());
+        let switch = |ui: &mut Ui| {
+            if let Some(shared) = &shared {
+                let mut settings = lock(shared);
+                toggle_switch(ui, &mut settings.passthrough, s.passthrough, s.on, s.off)
+                    .on_hover_text(s.passthrough_tip);
+            }
+        };
+        match layout {
+            ListLayout::OneLine => {
+                ui.horizontal(|ui| {
+                    name_and_area(ui);
+                    buttons(ui);
+                    switch(ui);
+                });
+            }
+            ListLayout::TwoLines => {
+                ui.horizontal_wrapped(name_and_area);
+                ui.horizontal(|ui| {
+                    buttons(ui);
+                    switch(ui);
+                });
+            }
+            ListLayout::Stacked => {
+                ui.horizontal_wrapped(name_and_area);
+                row_or_column(ui, columns.buttons, buttons);
+                switch(ui);
+            }
+        }
+        action
     }
 
     /// One magnifier in the Home list. Returns the card's natural height.
@@ -714,5 +920,89 @@ impl App {
         ui.label(RichText::new(&status.text).color(color).strong());
         ui.ctx().request_repaint_after(status.until - now);
         true
+    }
+}
+
+/// What one row of the Home list shows.
+struct ListRow {
+    id: u32,
+    name: String,
+    /// Area size, or "No area".
+    area: String,
+    has_area: bool,
+    open: bool,
+    selected: bool,
+}
+
+/// How the rows of the Home list are laid out, from wide windows to narrow ones.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ListLayout {
+    /// Name, area and every control on one line, in columns.
+    OneLine,
+    /// Name and area, then the controls on one line.
+    TwoLines,
+    /// Name and area, the buttons (stacked if needed), then the switch.
+    Stacked,
+}
+
+/// A button clicked in a row of the Home list.
+enum RowAction {
+    Toggle,
+    Settings,
+    Select,
+}
+
+/// Column widths of the Home list (each including the spacing after it), shared by
+/// every row so the controls line up.
+struct ListColumns {
+    name: f32,
+    area: f32,
+    open: f32,
+    select: f32,
+    /// Open/Close, Settings and Select together.
+    buttons: f32,
+    /// The passthrough switch with its longest text.
+    switch: f32,
+    /// Width of a whole row on one line, without the row padding.
+    total: f32,
+    /// Row padding on each side.
+    margin: f32,
+    spacing: f32,
+}
+
+impl ListColumns {
+    fn measure(ui: &Ui, s: &Strings, rows: &[ListRow]) -> Self {
+        let spacing = ui.spacing().item_spacing.x;
+        let widest = |texts: &mut dyn Iterator<Item = &str>| {
+            texts
+                .map(|t| text_width(ui, t, TextStyle::Body))
+                .fold(0.0, f32::max)
+                + spacing
+        };
+        let name = widest(&mut rows.iter().map(|r| r.name.as_str()));
+        let area = widest(&mut rows.iter().map(|r| r.area.as_str()));
+        let open = button_width(ui, s.open_lupa).max(button_width(ui, s.close_lupa));
+        let settings = ui.spacing().interact_size.y + spacing;
+        let select = button_width(ui, s.select_label)
+            .max(text_width(ui, s.selected_label, TextStyle::Body) + spacing);
+        let switch = ui.spacing().interact_size.y * 1.9
+            + spacing
+            + [s.on, s.off]
+                .map(|state| {
+                    text_width(ui, &format!("{}: {state}", s.passthrough), TextStyle::Body)
+                })
+                .into_iter()
+                .fold(0.0, f32::max);
+        Self {
+            name,
+            area,
+            open,
+            select,
+            buttons: open + settings + select,
+            switch,
+            total: name + area + open + settings + select + switch,
+            margin: spacing * 1.25,
+            spacing,
+        }
     }
 }

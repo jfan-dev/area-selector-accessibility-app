@@ -36,8 +36,10 @@ pub struct WindowState {
     pub strings: &'static Strings,
     /// The magnifier is open (label of the Open/Close button).
     pub lupa_open: bool,
-    /// Delete was pressed; waiting for confirmation.
+    /// Delete was pressed; the confirmation dialog is open.
     pub confirm_delete: bool,
+    /// Move the keyboard focus to Cancel when the dialog opens.
+    pub focus_cancel: bool,
     /// The window was closed (X); the app drops it on its next frame.
     pub closed: bool,
     /// How far the content sticks out past the window edge (layout tests).
@@ -51,6 +53,7 @@ impl WindowState {
             strings,
             lupa_open: false,
             confirm_delete: false,
+            focus_cancel: false,
             closed: false,
             #[cfg(test)]
             overflow: 0.0,
@@ -93,6 +96,7 @@ pub fn window_ui(
             }
         });
     });
+    delete_dialog(&ui.ctx().clone(), settings, state, &mut requests);
     if ui.ctx().input(|i| i.viewport().close_requested()) {
         state.closed = true;
     }
@@ -204,21 +208,52 @@ fn contents(
     });
 
     ui.add_space(gap);
-    if state.confirm_delete {
-        card(ui, s.delete_magnifier, |ui| {
+    if remove_button(ui, true, s.delete_magnifier).clicked() {
+        state.confirm_delete = true;
+        state.focus_cancel = true;
+    }
+}
+
+/// Id of the delete confirmation dialog (layout tests read its rect).
+pub fn delete_dialog_id(magnifier_id: u32) -> Id {
+    Id::unique(("delete_confirm", magnifier_id))
+}
+
+/// "Delete this magnifier?" as a modal dialog over the dimmed window. Cancel has the
+/// keyboard focus when it opens, so Enter/Space never delete by accident; Esc or a
+/// click outside cancels.
+fn delete_dialog(
+    ctx: &Context,
+    settings: &MagnifierSettings,
+    state: &mut WindowState,
+    requests: &mut Vec<MagnifierRequest>,
+) {
+    if !state.confirm_delete {
+        return;
+    }
+    let s = state.strings;
+    let (mut delete, mut cancel) = (false, false);
+    let response = Modal::new(delete_dialog_id(settings.id)).show(ctx, |ui| {
+        ui.set_max_width((ctx.content_rect().width() - 48.0).clamp(200.0, 420.0));
+        a11y_group(ui, Role::AlertDialog, s.delete_magnifier, |ui| {
+            ui.heading(s.delete_magnifier);
             ui.label((s.delete_confirm)(&settings.name));
+            ui.add_space(section_gap(ui) * 0.5);
             ui.horizontal_wrapped(|ui| {
-                if remove_button(ui, true, s.delete_yes).clicked() {
-                    requests.push(MagnifierRequest::Delete(id));
-                    state.confirm_delete = false;
+                delete = remove_button(ui, true, s.delete_yes).clicked();
+                let no = ui.button(s.delete_no);
+                if std::mem::take(&mut state.focus_cancel) {
+                    no.request_focus();
                 }
-                if ui.button(s.delete_no).clicked() {
-                    state.confirm_delete = false;
-                }
+                cancel = no.clicked();
             });
         });
-    } else if remove_button(ui, true, s.delete_magnifier).clicked() {
-        state.confirm_delete = true;
+    });
+    if delete {
+        requests.push(MagnifierRequest::Delete(settings.id));
+        state.confirm_delete = false;
+    } else if cancel || response.should_close() {
+        state.confirm_delete = false;
     }
 }
 

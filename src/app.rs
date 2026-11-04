@@ -888,7 +888,7 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use area_selector::config::BorderPreset;
+    use area_selector::config::{BorderPreset, HomeView};
     use area_selector::model::{Area, SerializablePos};
 
     fn area() -> Area {
@@ -934,9 +934,11 @@ mod tests {
         tab: Tab,
         high_contrast: bool,
         magnifiers: usize,
+        view: HomeView,
     ) -> f32 {
         let ctx = egui::Context::default();
         let mut config = test_config(magnifiers);
+        config.home_view = view;
         config.appearance.ui_scale = ui_scale;
         config.appearance.high_contrast = high_contrast;
         let mut app = App::with_config(&ctx, config, lang, None, None);
@@ -965,14 +967,29 @@ mod tests {
                         } else {
                             &[1]
                         };
+                        let views: &[HomeView] = if tab == Tab::Home {
+                            &[HomeView::Cards, HomeView::List]
+                        } else {
+                            &[HomeView::Cards]
+                        };
                         for &count in counts {
-                            for high_contrast in [false, true] {
-                                let over = overflow(lang, width, scale, tab, high_contrast, count);
-                                assert!(
-                                    over <= 1.0,
-                                    "{lang:?} {tab:?} ({count} magnifiers) at {width} px, {:.0}%, high contrast {high_contrast}: content is {over:.0} px too wide",
-                                    scale * 100.0
-                                );
+                            for &view in views {
+                                for high_contrast in [false, true] {
+                                    let over = overflow(
+                                        lang,
+                                        width,
+                                        scale,
+                                        tab,
+                                        high_contrast,
+                                        count,
+                                        view,
+                                    );
+                                    assert!(
+                                        over <= 1.0,
+                                        "{lang:?} {tab:?} {view:?} ({count} magnifiers) at {width} px, {:.0}%, high contrast {high_contrast}: content is {over:.0} px too wide",
+                                        scale * 100.0
+                                    );
+                                }
                             }
                         }
                     }
@@ -1039,6 +1056,30 @@ mod tests {
             ("home_light", ThemeMode::Light, false, Tab::Home, 900.0, 1.0),
             ("home_dark", ThemeMode::Dark, false, Tab::Home, 900.0, 1.0),
             (
+                "home_list_light",
+                ThemeMode::Light,
+                false,
+                Tab::Home,
+                900.0,
+                1.0,
+            ),
+            (
+                "home_list_hc_dark",
+                ThemeMode::Dark,
+                true,
+                Tab::Home,
+                900.0,
+                1.0,
+            ),
+            (
+                "home_list_narrow_dark",
+                ThemeMode::Dark,
+                false,
+                Tab::Home,
+                480.0,
+                1.0,
+            ),
+            (
                 "home_hc_light",
                 ThemeMode::Light,
                 true,
@@ -1101,6 +1142,9 @@ mod tests {
             config.appearance.theme = theme;
             config.appearance.high_contrast = high_contrast;
             config.appearance.ui_scale = scale;
+            if name.contains("list") {
+                config.home_view = HomeView::List;
+            }
             let mut app = App::with_config(&egui::Context::default(), config, Lang::Pt, None, None);
             app.tab = tab;
             app.applied_appearance = None; // apply to the harness context below
@@ -1124,6 +1168,8 @@ mod tests {
             ("settings_light", ThemeMode::Light, false, 480.0, 1.0),
             ("settings_hc_dark", ThemeMode::Dark, true, 480.0, 1.0),
             ("settings_narrow_dark", ThemeMode::Dark, false, 340.0, 1.5),
+            ("settings_delete_light", ThemeMode::Light, false, 480.0, 1.0),
+            ("settings_delete_hc_dark", ThemeMode::Dark, true, 340.0, 1.5),
         ];
         for (name, theme, high_contrast, width, scale) in windows {
             let appearance = Appearance {
@@ -1132,10 +1178,9 @@ mod tests {
                 ui_scale: scale,
                 ..Appearance::default()
             };
-            let state = (
-                sample_magnifiers(1).remove(0),
-                WindowState::new(i18n::tr(Lang::Pt)),
-            );
+            let mut window = WindowState::new(i18n::tr(Lang::Pt));
+            window.confirm_delete = name.contains("delete");
+            let state = (sample_magnifiers(1).remove(0), window);
             let mut harness = egui_kittest::Harness::builder()
                 .with_size(vec2(width, 1100.0))
                 .wgpu()
@@ -1191,6 +1236,17 @@ mod tests {
                                 scale * 100.0,
                                 state.overflow
                             );
+                            if confirm_delete {
+                                let id = magnifier_window::delete_dialog_id(settings.id);
+                                let rect = ctx
+                                    .memory(|m| m.area_rect(id))
+                                    .expect("delete dialog not shown");
+                                assert!(
+                                    rect.left() >= -0.5 && rect.right() <= width + 0.5,
+                                    "{lang:?} delete dialog at {width} px, {:.0}%: {rect:?} outside the window",
+                                    scale * 100.0
+                                );
+                            }
                         }
                     }
                 }

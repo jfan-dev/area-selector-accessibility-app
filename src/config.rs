@@ -25,6 +25,17 @@ pub enum ThemeMode {
     Dark,
 }
 
+/// How the Home tab shows the magnifiers.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HomeView {
+    /// Compact cards, two per row on wide windows.
+    #[default]
+    Cards,
+    /// One row per magnifier.
+    List,
+}
+
 /// Colours of the magnifier border: (interactive, passthrough).
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -195,6 +206,9 @@ pub struct AppConfig {
     /// The first-run guide was finished or skipped.
     #[serde(default)]
     pub onboarding_done: bool,
+    /// Layout of the magnifiers on the Home tab.
+    #[serde(default)]
+    pub home_view: HomeView,
     /// Single-magnifier fields of older versions (never written).
     #[serde(flatten, skip_serializing)]
     pub legacy: LegacyFields,
@@ -215,6 +229,7 @@ impl Default for AppConfig {
             close_to_tray: true,
             tray_notice_shown: false,
             onboarding_done: false,
+            home_view: HomeView::Cards,
             legacy: LegacyFields::default(),
         }
     }
@@ -495,6 +510,7 @@ mod tests {
             close_to_tray: false,
             tray_notice_shown: true,
             onboarding_done: true,
+            home_view: HomeView::List,
             legacy: LegacyFields::default(),
         };
         save_config_to(&path, &cfg).unwrap();
