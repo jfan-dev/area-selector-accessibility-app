@@ -62,6 +62,8 @@ Every control has a tooltip and can be reached with **Tab** (Space/Enter activat
 | **Ctrl+Alt+A** | Select area (selected magnifier) |
 | **Ctrl+Alt+PageUp / PageDown** | Zoom in / out (selected magnifier) |
 | **Ctrl+Alt+N** | Select the next magnifier (its border flashes) |
+
+Keep **Ctrl+Alt** held to chain shortcuts (e.g. N, then PageUp, then P); holding PageUp/PageDown keeps zooming.
 | **Ctrl+Alt+H** | Show/hide the panel (minimizes it when it is in front) |
 
 ### System tray
