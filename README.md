@@ -62,9 +62,9 @@ Every control has a tooltip and can be reached with **Tab** (Space/Enter activat
 | **Ctrl+Alt+A** | Select area (selected magnifier) |
 | **Ctrl+Alt+PageUp / PageDown** | Zoom in / out (selected magnifier) |
 | **Ctrl+Alt+N** | Select the next magnifier (its border flashes) |
+| **Ctrl+Alt+H** | Show/hide the panel (minimizes it when it is in front) |
 
 Keep **Ctrl+Alt** held to chain shortcuts (e.g. N, then PageUp, then P); holding PageUp/PageDown keeps zooming.
-| **Ctrl+Alt+H** | Show/hide the panel (minimizes it when it is in front) |
 
 ### System tray
 Closing the panel keeps the app running in the system tray (the first time, a short message explains it — turn it off under *Appearance → Window*). Click the tray icon to open the panel; right-click for a menu with each magnifier (check mark = open), passthrough for all, and Quit.
@@ -182,7 +182,6 @@ If running from inside the WSL filesystem is slow, copy `area_selector.exe` to t
 | `src/config.rs` | Settings load/save |
 | `src/cli.rs` | Command-line argument parsing |
 | `src/icon.rs` / `build.rs` | App icon and version info embedded in the exe |
-| `IMPROVEMENT_PLAN.md` / `UX_PLAN.md` | Roadmaps of the quality and UI/UX improvements |
 
 ---
 
